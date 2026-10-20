@@ -1,1867 +1,1683 @@
-<!DOCTYPE html>
-<html lang="en" dir="ltr">
-<head>
-<base target="_top">
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tracker</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
-<style>
-  :root{
-    --bg:#000000; --panel:#161b24; --panel-2:#1e2531; --line:#2b3242;
-    --text:#e8eaf0; --muted:#838da0; --amber:#e8a33d;
-    --phase1:#5b8def; --phase2:#a374e8; --phase3:#ef8b5c; --mapless:#38bdf8; --me4:#f06292;
-    --ok:#4fd1a8; --danger:#e8636b;
-  }
-  html.light{ --bg:#f3f4f7; --panel:#fff; --panel-2:#f0f1f5; --line:#dde0e8; --text:#1a1d24; --muted:#6b7280; }
-  *{box-sizing:border-box;}
-  body{ margin:0; background:var(--bg); color:var(--text); font-family:'Space Grotesk',sans-serif; min-height:100vh; padding:24px 16px 60px; transition:.25s; }
-  .wrap{max-width:900px;margin:0 auto;}
-  header{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:20px; flex-wrap:wrap; border-bottom:1px solid var(--line); padding-bottom:16px; }
-  header h1{ font-size:21px; font-weight:800; margin:0; }
-  .header-right{ display:flex; gap:8px; }
-  .mode-btn{ background:var(--panel); border:1px solid var(--line); color:var(--text); font-size:13px; font-weight:700; padding:8px 12px; border-radius:100px; cursor:pointer; display:flex; align-items:center; gap:6px; }
-  .mode-btn.admin-on{ border-color:var(--ok); color:var(--ok); }
-  .tabs{ display:flex; gap:6px; margin-bottom:18px; background:var(--panel); padding:5px; border-radius:12px; border:1px solid var(--line); flex-wrap:wrap; }
-  .tab-btn{ background:transparent; border:none; color:var(--muted); font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:13.5px; padding:9px 16px; border-radius:8px; cursor:pointer; }
-  .tab-btn.active{ background:var(--amber); color:#1a1206; }
-  .panel{ background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px; margin-bottom:16px; position:relative; overflow:hidden; }
-  /* ===== Gradient Border Effect (spotlight follows the cursor) ===== */
-  .panel::before{
-    content:"";
-    position:absolute;
-    inset:0;
-    border-radius:inherit;
-    padding:1.5px;
-    background:radial-gradient(220px circle at var(--x,50%) var(--y,50%), var(--amber), transparent 70%);
-    -webkit-mask:linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite:xor;
-    mask-composite:exclude;
-    pointer-events:none;
-    opacity:0;
-    transition:opacity .25s ease;
-  }
-  .panel.glow-active::before{ opacity:1; }
-  .panel h2{ font-size:14px; font-weight:700; margin:0 0 16px; color:var(--amber); text-transform:uppercase; letter-spacing:.4px; }
-  .grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
-  label{ display:block; font-size:11.5px; color:var(--muted); margin-bottom:6px; font-weight:700; }
-  input, select{ width:100%; background:var(--panel-2); border:1px solid var(--line); color:var(--text); border-radius:8px; padding:11px 12px; font-family:'Space Grotesk',sans-serif; font-size:15px; outline:none; }
-  input:focus, select:focus{ border-color:var(--amber); }
-  .btn{ background:var(--amber); color:#1a1206; border:none; font-weight:800; font-size:14px; padding:12px 22px; border-radius:9px; cursor:pointer; }
-  .btn.secondary{ background:transparent; border:1px solid var(--line); color:var(--text); }
-  .btn:disabled{ opacity:.5; cursor:not-allowed; }
-  .actions-row{ margin-top:14px; display:flex; gap:10px; flex-wrap:wrap; }
-  .msg{ margin-top:12px; font-size:13px; padding:10px 14px; border-radius:8px; }
-  .msg.ok{ background:rgba(79,209,168,.1); color:var(--ok); border:1px solid rgba(79,209,168,.3); }
-  .msg.err{ background:rgba(232,99,107,.1); color:var(--danger); border:1px solid rgba(232,99,107,.3); }
+/**
+ * Mickey — Dashboard Edition (National ID based)
+ * =====================================================================
+ * PAGE 1 — Check In:
+ *   Trainee types their National ID and taps "Start Tracker".
+ *   - Marks today as PRESENT in their attendance record.
+ *   - If this is their very first check-in ever, `startedAt` gets stamped
+ *     (this is the anchor used to compute "Day N").
+ *   - Reveals their Name / Yubikey / PC / Room / current Day number.
+ *
+ * PAGE 2 — Attendance:
+ *   Full month calendar for a given National ID, read LIVE from the
+ *   "Attend" sheet (day1, day2, ... columns) — that sheet is now the
+ *   authoritative attendance record. Any cell with a value other than
+ *   blank or "0" counts as present for that day; "0" or blank counts as
+ *   absent. Staff can freely edit cells directly in the sheet (dropdowns,
+ *   custom notes, whatever) and the app will respect it — check-ins from
+ *   the app only ever fill in cells that are still blank, never overwrite
+ *   an existing value.
+ *   - Green day  = present (any non-blank, non-"0" value)
+ *   - Red day    = a past day (on/after their startedAt) with "0" or blank
+ *   - Days before they started, or in the future, are shown neutral/grey.
+ *
+ * PAGE 3 — My Stage:
+ *   Shows the full stage list (grouped by phase). Stages before the
+ *   trainee's current stage are marked done (✓, struck through) but stay
+ *   clickable. Tapping ANY stage — earlier or later — opens its reference
+ *   link (if any) and sets it as the trainee's current stage, so they can
+ *   freely move forward to advance or back to revisit/revert.
+ *
+ * ADMIN (password gated, hidden behind the lock icon in the header):
+ *   Pre-register trainees (National ID + Name + PC + Yubikey + Room +
+ *   Shift). Also lets the admin view everyone and delete records.
+ *
+ * TEAMS (admin-only):
+ *   One BATCH = one extra sheet (tab) named after the batch, e.g. "8/10".
+ *   PC tiles are read from that sheet. Green = present, red = absent,
+ *   "!" = no task today. Tapping a tile opens a card with the name / PC /
+ *   Yubikey, plus a Comment field saved into the batch sheet.
+ *
+ * SETUP:
+ * 1. Extensions > Apps Script (or a standalone project at script.google.com).
+ * 2. Replace Code.gs with this file.
+ * 3. Add an HTML file named exactly "Index" with Index.html's content.
+ * 4. Deploy > New deployment > Web app (Execute as: Me, Access: Anyone
+ *    with the link, or your domain).
+ * 5. Open the URL, authorize, and you're done. No manual sheet setup
+ *    needed — the script creates/repairs its own sheet automatically.
+ */
 
-  /* Check-in card */
-  .id-card{ text-align:center; }
-  .id-card .big-name{ font-size:24px; font-weight:800; margin:6px 0 2px; }
-  .id-card .row-info{ display:flex; justify-content:center; gap:10px; flex-wrap:wrap; margin:16px 0; }
-  .info-chip{ background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:12px 16px; min-width:100px; }
-  .info-chip .lab{ font-size:10.5px; color:var(--muted); font-weight:700; text-transform:uppercase; margin-bottom:4px; }
-  .info-chip .val{ font-size:16px; font-weight:800; }
-  .info-chip.day .val{ color:var(--amber); }
-  .switch-link{ margin-top:10px; font-size:12.5px; color:var(--muted); background:none; border:none; text-decoration:underline; cursor:pointer; }
+const SHEET_NAME = 'Entries';
+const ATTEND_SHEET_NAME = 'Attend';
+const PROP_KEY = 'SPREADSHEET_ID';
+// Admins live in a sheet called "users" (columns: user | password). In Check In,
+// an admin types their USER NAME in the National ID box, taps Start Tracker and
+// is asked for the password. On success the server issues a secret token which
+// is stored on THAT device only and sent with every admin call. Anyone using a
+// normal National ID only ever sees the trainee program.
+const USERS_SHEET_NAME = 'users';
+const LOG_SHEET_NAME = 'log'; // self-registrations ("Register" form) land here
+const ADMIN_TOKENS_KEY = 'ADMIN_TOKENS';
 
-  /* Calendar */
-  .cal-nav{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
-  .cal-nav .cal-title{ font-weight:800; font-size:15px; }
-  .cal-nav button{ background:var(--panel-2); border:1px solid var(--line); color:var(--text); border-radius:8px; padding:6px 12px; cursor:pointer; font-size:14px; }
-  .cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
-  .cal-day{ aspect-ratio:1; display:flex; align-items:center; justify-content:center; border-radius:8px; font-size:13px; font-weight:700; border:1px solid var(--line); }
-  .cal-day.present{ background:rgba(79,209,168,.18); color:var(--ok); border-color:rgba(79,209,168,.4); }
-  .cal-day.absent{ background:rgba(232,99,107,.18); color:var(--danger); border-color:rgba(232,99,107,.4); }
-  .cal-day.today{ background:rgba(232,163,61,.15); color:var(--amber); border-color:var(--amber); }
-  .cal-day.future{ color:var(--muted); opacity:.4; }
-  .cal-day.inactive{ color:var(--muted); opacity:.25; }
-  .legend{ display:flex; gap:14px; margin-top:14px; flex-wrap:wrap; font-size:12px; color:var(--muted); }
-  .legend span{ display:flex; align-items:center; gap:6px; }
-  .dotleg{ width:10px; height:10px; border-radius:3px; display:inline-block; }
+// Column layout (1-based):
+// 1 id | 2 nationalId | 3 name | 4 pc | 5 flash | 6 room | 7 shift |
+// 8 stage | 9 startedAt | 10 updatedAt | 11 attendance (JSON string) |
+// 12 comment | 13 feedback (Pass / Failed / Pending / Dropped out)
+const HEADERS = ['id', 'nationalId', 'name', 'pc', 'flash', 'room', 'shift', 'stage', 'startedAt', 'updatedAt', 'attendance', 'comment', 'feedback'];
+const COL = { id:1, nationalId:2, name:3, pc:4, flash:5, room:6, shift:7, stage:8, startedAt:9, updatedAt:10, attendance:11, comment:12, feedback:13 };
 
-  /* Stage picker */
-  .phase-block{ margin-top:16px; }
-  .phase-title{ font-size:11.5px; font-weight:800; text-transform:uppercase; margin-bottom:8px; padding-bottom:4px; border-bottom:1px solid var(--line); }
-  .phase-title.phase1{ color:var(--phase1); } .phase-title.phase2{ color:var(--phase2); }
-  .phase-title.phase3{ color:var(--phase3); } .phase-title.mapless{ color:var(--mapless); } .phase-title.me4{ color:var(--me4); }
-  .stage-picker{ display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:8px; }
-  .stage-opt{ border:1px solid var(--line); background:var(--panel); color:var(--text); padding:10px 8px; border-radius:9px; font-size:12.5px; font-weight:700; cursor:pointer; text-align:center; }
-  .stage-opt.current{ border-color:var(--amber); background:rgba(232,163,61,.12); color:var(--amber); }
-  .stage-opt.done{ opacity:.6; text-decoration:line-through; }
-  .stage-opt:not(.done):hover{ border-color:var(--amber); }
-
-  /* Admin table */
-  table{ width:100%; border-collapse:collapse; }
-  th{ text-align:left; font-size:11px; color:var(--muted); font-weight:700; padding:8px; border-bottom:1px solid var(--line); }
-  td{ padding:10px 8px; border-bottom:1px solid var(--line); font-size:13px; }
-  .mono{ font-family:'JetBrains Mono',monospace; color:var(--muted); font-size:12px; }
-  .badge{ display:inline-block; padding:4px 10px; border-radius:100px; font-size:11px; font-weight:700; }
-  .badge.present{ background:rgba(79,209,168,.15); color:var(--ok); }
-  .badge.absent{ background:rgba(232,99,107,.15); color:var(--danger); }
-  .del-btn{ background:transparent; border:none; color:var(--muted); cursor:pointer; font-size:15px; }
-  .del-btn:hover{ color:var(--danger); }
-  .empty{ text-align:center; padding:26px 10px; color:var(--muted); font-size:13px; }
-  @media (max-width:600px){
-    .row-info{ gap:6px !important; }
-    .info-chip{ min-width:80px; padding:10px 12px; }
-  }
-
-  /* ===== 3D Glass Carousel (Check In / Attendance / My Stage) ===== */
-  #carousel-wrap{ margin-bottom:18px; }
-  #carousel{
-    position:relative;
-    height:250px;
-    perspective:1400px;
-    margin:6px 0 16px;
-    transition:height .4s ease;
-  }
-  #carousel.has-expanded{ height:600px; }
-  .carousel-slide{
-    position:absolute;
-    top:0; left:50%;
-    --sw:min(58vw, 230px);
-    --sh:230px;
-    width:var(--sw);
-    height:var(--sh);
-    margin-left:calc(-1 * var(--sw) / 2);
-    overflow:visible;
-    transition:width .4s ease, height .4s ease, margin-left .4s ease,
-               transform .6s cubic-bezier(.22,.61,.36,1), opacity .5s ease, filter .5s ease;
-    will-change:transform;
-  }
-  .carousel-slide.expanded{
-    --sw:min(92vw, 480px);
-    --sh:580px;
-    z-index:40 !important;
-  }
-  .carousel-slide .panel{ height:100%; margin-bottom:0; position:relative; overflow:hidden; }
-  .card-peek{ display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:8px; cursor:pointer; text-align:center; }
-  .card-peek .peek-icon{ font-size:32px; }
-  .card-peek .peek-title{ font-size:14px; font-weight:800; }
-  .card-peek .peek-hint{ font-size:11px; color:var(--muted); }
-  .carousel-slide.expanded .card-peek{ display:none; }
-  .card-full{ display:none; position:relative; height:100%; }
-  .carousel-slide.expanded .card-full{ display:block; }
-  .card-close{
-    position:absolute; top:-6px; right:-6px; background:var(--panel-2); border:1px solid var(--line);
-    color:var(--text); width:30px; height:30px; border-radius:50%; cursor:pointer; font-size:14px; font-weight:800; z-index:5;
-  }
-  .card-close:hover{ border-color:var(--danger); color:var(--danger); }
-  .carousel-nav{ display:flex; align-items:center; justify-content:center; gap:16px; }
-  .carousel-nav button{
-    background:var(--panel); border:1px solid var(--line); color:var(--text);
-    width:38px; height:38px; border-radius:50%; cursor:pointer; font-size:16px; font-weight:800;
-  }
-  .carousel-nav button:hover{ border-color:var(--amber); }
-  .carousel-dots{ display:flex; gap:8px; }
-  .carousel-dots .dot{ width:8px; height:8px; border-radius:50%; background:var(--line); cursor:pointer; transition:.2s; }
-  .carousel-dots .dot.active{ background:var(--amber); width:20px; border-radius:4px; }
-  .locked-hint{ text-align:center; color:var(--muted); font-size:13px; padding:30px 10px; }
-
-  /* ===== Dashboard (admin-only) ===== */
-  .dash-filters{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
-  .dash-filters select{ width:auto; min-width:130px; font-size:13px; padding:8px 10px; }
-  .dash-filters .btn{ padding:8px 16px; font-size:13px; }
-  .dash-cards{ display:grid; grid-template-columns:repeat(auto-fill, minmax(190px,1fr)); gap:10px; margin-bottom:20px; }
-  .dash-card{ background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:12px; position:relative; }
-  .dash-card .dc-top{ display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px; }
-  .dash-card .dc-pc{ font-weight:800; font-size:14px; color:var(--mapless); }
-  .dash-card .dc-badge{ background:var(--mapless); color:#04222c; font-weight:800; font-size:11px; border-radius:100px; padding:2px 8px; }
-  .dash-card .dc-name{ font-size:12.5px; font-weight:700; color:var(--text); }
-  .dash-card .dc-email{ font-size:11px; color:var(--muted); margin-bottom:8px; word-break:break-all; }
-  .dash-card .dc-queue{ display:inline-block; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:3px 7px; font-size:10.5px; color:var(--mapless); margin:2px 3px 0 0; }
-  .dash-section{ margin-bottom:20px; }
-  .dash-section-title{ display:flex; justify-content:space-between; align-items:baseline; font-size:12.5px; font-weight:800; color:var(--amber); text-transform:uppercase; letter-spacing:.4px; margin-bottom:10px; }
-  .dash-section-title .count-note{ color:var(--muted); font-weight:600; text-transform:none; font-size:11.5px; }
-  .dash-table-wrap{ overflow-x:auto; max-height:420px; overflow-y:auto; border:1px solid var(--line); border-radius:10px; }
-  .dash-table-wrap table{ min-width:1100px; }
-  .dash-table-wrap th{ position:sticky; top:0; background:var(--panel); z-index:2; white-space:nowrap; }
-  .dash-table-wrap td{ white-space:nowrap; font-size:12.5px; }
-  .dash-badge-pass{ padding:2px 8px; border-radius:100px; font-size:11px; font-weight:800; }
-  .dash-badge-pass.QA{ background:rgba(79,209,168,.15); color:var(--ok); }
-  .dash-badge-pass.FP{ background:rgba(232,99,107,.15); color:var(--danger); }
-  .dash-qtable{ width:100%; border-collapse:collapse; font-size:12.5px; }
-  .dash-qtable th, .dash-qtable td{ padding:8px 10px; border-bottom:1px solid var(--line); text-align:center; }
-  .dash-qtable th:first-child, .dash-qtable td:first-child{ text-align:left; }
-  .dash-qtable tr:last-child{ font-weight:800; color:var(--amber); }
-  .dash-qtable .qn{ color:var(--mapless); }
-  .dash-modrow{ margin-bottom:10px; }
-  .dash-modrow .mr-top{ display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:4px; }
-  .dash-modrow .mr-bar{ height:6px; background:var(--panel-2); border-radius:4px; overflow:hidden; }
-  .dash-modrow .mr-fill{ height:100%; background:var(--ok); border-radius:4px; }
-  .dash-objcount{ display:flex; gap:30px; flex-wrap:wrap; }
-  .dash-objcount .big{ font-size:32px; font-weight:800; color:var(--mapless); }
-  .dash-objcount .lab{ font-size:11px; color:var(--muted); text-transform:uppercase; font-weight:700; margin-bottom:2px; }
-  .dash-chips{ display:flex; flex-wrap:wrap; gap:8px; }
-  .dash-chip{ background:var(--panel-2); border:1px solid var(--line); border-radius:100px; padding:6px 12px; font-size:12px; }
-  .dash-chip b{ color:var(--amber); margin-left:4px; }
-
-
-  /* ===== Quality (admin-only) ===== */
-  .qual-stat-card{
-    text-align:center; padding:30px 20px; background:linear-gradient(180deg, var(--panel-2), var(--panel));
-    border:1px solid var(--line); border-radius:14px; margin-bottom:22px;
-  }
-  .qual-stat-card .qs-icon{ font-size:26px; margin-bottom:6px; }
-  .qual-stat-card .qs-num{ font-size:42px; font-weight:800; color:var(--mapless); line-height:1.1; }
-  .qual-stat-card .qs-label{ font-size:12.5px; color:var(--muted); font-weight:700; margin-top:4px; }
-  .qual-history-title{ display:flex; align-items:center; gap:8px; font-size:18px; font-weight:800; margin:0 0 14px; }
-  .qual-history-title .bar{ height:3px; width:60px; background:linear-gradient(90deg,var(--amber),var(--mapless)); border-radius:3px; margin-top:2px; }
-  .qual-cards{ display:grid; grid-template-columns:repeat(auto-fill, minmax(260px,1fr)); gap:14px; }
-  .qual-card{ background:var(--panel-2); border:1px solid var(--line); border-radius:12px; padding:16px; }
-  .qual-card .qc-title{ font-weight:800; font-size:14px; margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid var(--line); }
-  .qual-card .qc-meta{ display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:5px; }
-  .qual-card .qc-meta b{ color:var(--text); font-weight:700; }
-  .qual-metric{ display:flex; justify-content:space-between; align-items:center; background:var(--panel); border-left:3px solid var(--ok); border-radius:6px; padding:8px 12px; margin-top:8px; font-size:12.5px; }
-  .qual-metric .qm-val{ color:var(--ok); font-weight:800; }
-
-  /* ===== Teams (admin-only) ===== */
-  .team-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(88px,1fr)); gap:12px; }
-  .team-pc{ position:relative; aspect-ratio:1; display:flex; align-items:center; justify-content:center; text-align:center;
-    border-radius:14px; font-family:'JetBrains Mono',monospace; font-weight:700; font-size:13px; cursor:pointer; border:1px solid; padding:4px; transition:transform .15s ease; }
-  .team-pc.present{ background:rgba(79,209,168,.15); color:var(--ok); border-color:rgba(79,209,168,.45); }
-  .team-pc.absent{ background:rgba(232,99,107,.16); color:var(--danger); border-color:rgba(232,99,107,.45); }
-  .team-pc:hover{ transform:translateY(-2px); }
-  .team-pc .warn{ position:absolute; top:-8px; right:-8px; width:24px; height:24px; border-radius:50%; background:var(--amber);
-    color:#1a1206; font-weight:800; font-size:13px; display:flex; align-items:center; justify-content:center; border:2px solid var(--panel); }
-  .team-legend{ display:flex; gap:14px; margin-top:16px; flex-wrap:wrap; font-size:12px; color:var(--muted); }
-  .team-legend span{ display:flex; align-items:center; gap:6px; }
-
-  #team-modal{ position:fixed; inset:0; z-index:10000; background:rgba(0,0,0,.65); display:none; align-items:center; justify-content:center; padding:16px; }
-  #team-modal.open{ display:flex; }
-  .tm-box{ background:var(--panel); border:1px solid var(--line); border-radius:20px; padding:26px 22px; width:100%; max-width:380px;
-    max-height:92vh; overflow-y:auto; text-align:center; position:relative; }
-  .tm-close{ position:absolute; top:12px; right:12px; background:var(--panel-2); border:1px solid var(--line); color:var(--text);
-    width:32px; height:32px; border-radius:50%; cursor:pointer; font-weight:800; }
-  .tm-pc{ font-size:20px; font-weight:800; margin:6px 0; }
-  .tm-status{ font-size:12.5px; font-weight:800; letter-spacing:.5px; text-transform:uppercase; margin-bottom:14px; }
-  .tm-status.present{ color:var(--ok); } .tm-status.absent{ color:var(--danger); }
-  .tm-chip{ background:var(--panel-2); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:10px; }
-  .tm-chip .lab{ font-size:10.5px; color:var(--muted); font-weight:700; text-transform:uppercase; margin-bottom:4px; }
-  .tm-chip .val{ font-size:15px; font-weight:800; word-break:break-all; }
-  .tm-box textarea{ width:100%; min-height:90px; resize:vertical; background:var(--panel-2); border:1px solid var(--line); color:var(--text);
-    border-radius:8px; padding:10px 12px; font-family:'Space Grotesk',sans-serif; font-size:14px; outline:none; }
-  .tm-box textarea:focus{ border-color:var(--amber); }
-  .tm-box label{ text-align:left; margin-top:10px; }
-
-  .batch-bar{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
-  .batch-chip{ background:var(--panel); border:1px solid var(--line); color:var(--text); font-family:'Space Grotesk',sans-serif;
-    font-weight:700; font-size:13px; padding:9px 16px; border-radius:100px; cursor:pointer; display:flex; align-items:center; gap:8px; }
-  .batch-chip .cnt{ background:var(--panel-2); color:var(--muted); border-radius:100px; padding:1px 8px; font-size:11px; }
-  .batch-chip:hover{ border-color:var(--amber); }
-  .batch-chip.active{ background:var(--amber); color:#1a1206; border-color:var(--amber); }
-  .batch-chip.active .cnt{ background:rgba(0,0,0,.18); color:#1a1206; }
-  .batch-summary{ font-size:12.5px; color:var(--muted); margin:-6px 0 14px; }
-  .batch-summary b{ color:var(--text); }
-
-  .stars{ display:flex; justify-content:center; gap:6px; margin:2px 0 4px; }
-  .stars span{ font-size:30px; line-height:1; cursor:pointer; color:var(--line); user-select:none; transition:transform .12s ease, color .12s ease; }
-  .stars span:hover{ transform:scale(1.15); }
-  .stars span.on{ color:var(--amber); }
-  .fb-row{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:2px; }
-  .fb-btn{ background:var(--panel-2); border:1px solid var(--line); color:var(--text); font-family:'Space Grotesk',sans-serif;
-    font-weight:800; font-size:13px; padding:10px 8px; border-radius:10px; cursor:pointer; }
-  .fb-btn:hover{ border-color:var(--amber); }
-  .fb-btn.active[data-fb="Pass"]{ background:rgba(79,209,168,.18); border-color:var(--ok); color:var(--ok); }
-  .fb-btn.active[data-fb="Failed"]{ background:rgba(232,99,107,.18); border-color:var(--danger); color:var(--danger); }
-  .fb-btn.active[data-fb="Pending"]{ background:rgba(232,163,61,.18); border-color:var(--amber); color:var(--amber); }
-  .fb-btn.active[data-fb="Dropped out"]{ background:rgba(163,116,232,.2); border-color:var(--phase2); color:var(--phase2); }
-
-  .day-tabs{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:2px; }
-  .day-tab{ position:relative; background:var(--panel-2); border:1px solid var(--line); color:var(--text); font-family:'Space Grotesk',sans-serif;
-    font-weight:800; font-size:13px; padding:9px 6px; border-radius:10px; cursor:pointer; }
-  .day-tab:hover{ border-color:var(--amber); }
-  .day-tab.active{ background:var(--amber); color:#1a1206; border-color:var(--amber); }
-  .day-tab.has::after{ content:""; position:absolute; top:6px; right:7px; width:7px; height:7px; border-radius:50%; background:var(--ok); }
-  .att-summary{ font-size:12.5px; color:var(--muted); margin:2px 0 8px; text-align:left; }
-  .att-summary b{ color:var(--text); }
-  .att-chips{ display:flex; flex-wrap:wrap; gap:5px; }
-  .att-chip{ min-width:34px; padding:3px 6px 2px; border-radius:7px; font-size:11.5px; font-weight:800; text-align:center; line-height:1.1;
-    background:var(--panel-2); border:1px solid var(--line); color:var(--muted); }
-  .att-chip small{ display:block; font-size:8.5px; font-weight:700; opacity:.75; margin-top:1px; }
-  .stage-box{ background:var(--panel-2); border:1px solid var(--line); border-radius:12px; padding:10px 14px; text-align:left; }
-  .stage-box .st-name{ font-size:15px; font-weight:800; }
-  .stage-box .st-sub{ font-size:11.5px; color:var(--muted); margin-top:3px; }
-  .stage-bar{ height:5px; background:var(--line); border-radius:4px; overflow:hidden; margin-top:8px; }
-  .stage-bar > div{ height:100%; background:var(--amber); border-radius:4px; }
-
-  /* ===== Custom scrollbar (JS-driven, guaranteed visible on every device) ===== */
-  .card-scroll{
-    height:100%;
-    overflow-y:auto;
-    padding-right:18px;
-    box-sizing:border-box;
-    -webkit-overflow-scrolling:touch;
-    scrollbar-width:none; /* Firefox: hide native, we render our own */
-  }
-  .card-scroll::-webkit-scrollbar{ width:0; height:0; } /* Chrome/Safari/Edge: hide native, we render our own */
-  .custom-scrollbar{
-    position:absolute; top:34px; right:2px; bottom:6px; width:10px;
-    background:var(--panel-2); border-radius:6px;
-    opacity:0; transition:opacity .25s ease; pointer-events:none;
-  }
-  .custom-scrollbar.visible{ opacity:1; }
-  .custom-scrollbar-thumb{
-    position:absolute; left:0; right:0; top:0; border-radius:6px;
-    background-image:url('data:image/png;base64,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');
-    background-repeat:no-repeat;
-    background-position:center;
-    background-size:16px 24px;
-    background-color:rgba(232,163,61,.22);
-    min-height:34px;
-    transition:top .05s linear;
-  }
-
-  /* ===== Splash Screen: "meeg" rising out of glowing water (water line = mid-screen) ===== */
-  body.has-splash{ overflow:hidden; }
-  #splash{
-    position:fixed; inset:0; z-index:9999;
-    background:#000;
-    overflow:hidden;
-    cursor:pointer;
-    transition:opacity .8s ease, visibility .8s ease;
-  }
-  #splash.hide{ opacity:0; visibility:hidden; pointer-events:none; }
-
-  .splash-glow{
-    position:absolute; left:50%; top:50%;
-    width:75vw; height:75vw; max-width:640px; max-height:640px;
-    transform:translate(-50%,-50%);
-    background:radial-gradient(circle, rgba(232,163,61,.55) 0%, rgba(232,163,61,.16) 35%, transparent 70%);
-    filter:blur(12px);
-    animation:splashGlowPulse 2.4s ease-in-out infinite;
-    z-index:1;
-  }
-  @keyframes splashGlowPulse{
-    0%,100%{ opacity:.7; transform:translate(-50%,-50%) scale(1); }
-    50%{ opacity:1; transform:translate(-50%,-50%) scale(1.08); }
-  }
-
-  .splash-text-wrap{
-    position:absolute; left:0; right:0; bottom:50%; z-index:3; overflow:hidden;
-    height:9rem; width:100%;
-    display:flex; align-items:flex-end; justify-content:center;
-  }
-  .splash-text{
-    font-family:'Space Grotesk',sans-serif;
-    font-weight:800;
-    font-size:clamp(3rem, 16vw, 7.5rem);
-    color:#fff4d6;
-    letter-spacing:2px;
-    text-shadow:
-      0 0 10px #e8a33d,
-      0 0 25px #e8a33d,
-      0 0 55px #e8a33d,
-      0 0 95px rgba(232,163,61,.65);
-    transform:translateY(160%);
-    opacity:0;
-    animation:splashEmerge 2.4s cubic-bezier(.19,1,.22,1) forwards;
-    animation-delay:.3s;
-  }
-  @keyframes splashEmerge{
-    0%{ transform:translateY(160%); opacity:0; }
-    55%{ opacity:1; }
-    70%{ transform:translateY(-8%); }
-    85%{ transform:translateY(4%); }
-    100%{ transform:translateY(0%); opacity:1; }
-  }
-
-  .splash-skip{
-    position:absolute; bottom:18px; left:50%; transform:translateX(-50%); z-index:5;
-    color:var(--muted); font-size:11.5px; opacity:0; animation:splashSkipFade .6s ease forwards; animation-delay:1.8s;
-  }
-  @keyframes splashSkipFade{ to{ opacity:1; } }
-
-
-</style>
-</head>
-<body class="has-splash">
-
-<!-- ===================== SPLASH SCREEN ===================== -->
-<div id="splash">
-  <div class="splash-glow"></div>
-  <div class="splash-text-wrap">
-    <div class="splash-text">Meeg</div>
-  </div>
-  <div class="splash-skip">Tap to skip</div>
-</div>
-
-<div class="wrap">
-  <header>
-    <h1> New Hire dashboard</h1>
-    <div class="header-right">
-      <button class="mode-btn" id="edit-mode-btn">🔐 <span id="edit-mode-label">Admin</span></button>
-      <button class="mode-btn" id="mode-toggle"><span id="mode-icon">🌙</span><span id="mode-label">Night Mode</span></button>
-    </div>
-  </header>
-
-  <div class="tabs">
-    <button class="tab-btn active" data-tab="carousel">🚀 My Progress</button>
-    <button class="tab-btn" data-tab="dashboard" id="dashboard-tab-btn" style="display:none">📊 Dashboard</button>
-    <button class="tab-btn" data-tab="quality" id="quality-tab-btn" style="display:none">✅ Quality</button>
-    <button class="tab-btn" data-tab="teams" id="teams-tab-btn" style="display:none">👥 Teams</button>
-    <button class="tab-btn" data-tab="admin" id="admin-tab-btn" style="display:none">🛠 Admin</button>
-  </div>
-
-  <!-- ===================== CAROUSEL: Check In / Attendance / My Stage ===================== -->
-  <div id="tab-carousel">
-    <div id="carousel-wrap">
-      <div id="carousel">
-
-        <!-- SLIDE 1: CHECK IN -->
-        <div class="carousel-slide" data-slide="0">
-          <div class="panel">
-            <div class="card-peek">
-              <div class="peek-icon">✅</div>
-              <div class="peek-title">Check In</div>
-              <div class="peek-hint">Tap to open</div>
-            </div>
-            <div class="card-full">
-              <button class="card-close" data-idx="0">✕</button>
-              <div class="card-scroll" id="card-scroll-0">
-                <h2 id="ci-title">Check In For Today</h2>
-                <div id="checkin-form">
-                  <div class="grid">
-                    <div><label>National ID</label><input id="ci-nid" placeholder="Enter your National ID" inputmode="numeric"></div>
-                  </div>
-                  <div class="actions-row"><button class="btn" id="ci-start-btn">Start Tracker</button><button class="btn secondary" id="ci-register-link">Logup</button></div>
-                  <div id="ci-pass-wrap" style="display:none;margin-top:14px">
-                    <label>Password</label>
-                    <input id="ci-pass" type="password" placeholder="Enter your password" autocomplete="current-password">
-                    <div class="actions-row">
-                      <button class="btn" id="ci-login-btn">Login</button>
-                      <button class="btn secondary" id="ci-pass-cancel">Cancel</button>
-                    </div>
-                  </div>
-                  <div id="ci-msg"></div>
-                </div>
-
-                <div id="register-form" style="display:none">
-                  <div class="grid">
-                    <div><label>National ID</label><input id="rg-nid" inputmode="numeric" maxlength="14" placeholder="14 digits"></div>
-                    <div><label>Name</label><input id="rg-name" placeholder="Full name" autocomplete="name"></div>
-                    <div><label>Phone number</label><input id="rg-phone" type="tel" inputmode="tel" placeholder="01xxxxxxxxx" autocomplete="tel"></div>
-                    <div><label>Gmail</label><input id="rg-gmail" type="email" placeholder="name@gmail.com" autocomplete="email"></div>
-                    <div><label>Shift</label>
-                      <select id="rg-shift"><option value="">Select…</option><option value="ON">ON</option><option value="N">N</option><option value="M">M</option></select>
-                    </div>
-                    <div><label>Location</label>
-                      <select id="rg-location"><option value="">Select…</option><option value="NC">NC</option><option value="SF">SF</option></select>
-                    </div>
-                  </div>
-                  <div class="actions-row">
-                    <button class="btn" id="rg-submit">Register</button>
-                    <button class="btn secondary" id="rg-back">Back to Check In</button>
-                  </div>
-                  <div id="rg-msg"></div>
-                </div>
-
-                <div id="checkin-card" class="id-card" style="display:none">
-                  <div class="big-name" id="ci-name">—</div>
-                  <div class="row-info">
-                    <div class="info-chip"><div class="lab">PC</div><div class="val" id="ci-pc">—</div></div>
-                    <div class="info-chip"><div class="lab">Yubikey</div><div class="val" id="ci-flash">—</div></div>
-                    <div class="info-chip"><div class="lab">Room</div><div class="val" id="ci-room">—</div></div>
-                    <div class="info-chip day"><div class="lab">Day</div><div class="val" id="ci-day">—</div></div>
-                  </div>
-                  <div class="actions-row" style="justify-content:center">
-                    <button class="btn secondary" id="ci-goto-attendance">📅 View Attendance ›</button>
-                  </div>
-                  <button class="switch-link" id="ci-switch">Not you? Switch National ID</button>
-                </div>
-              </div>
-              <div class="custom-scrollbar" id="custom-scrollbar-0"><div class="custom-scrollbar-thumb"></div></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- SLIDE 2: ATTENDANCE -->
-        <div class="carousel-slide" data-slide="1">
-          <div class="panel">
-            <div class="card-peek">
-              <div class="peek-icon">📅</div>
-              <div class="peek-title">Attendance</div>
-              <div class="peek-hint">Tap to open</div>
-            </div>
-            <div class="card-full">
-              <button class="card-close" data-idx="1">✕</button>
-              <div class="card-scroll" id="card-scroll-1">
-                <h2>Monthly Attendance</h2>
-                <div id="att-locked" class="locked-hint">Check in on the first card to unlock your attendance calendar.</div>
-                <div id="att-body" style="display:none">
-                  <div id="att-cal-holder">
-                    <div class="cal-nav">
-                      <button id="att-prev">‹</button>
-                      <div class="cal-title" id="att-title">—</div>
-                      <button id="att-next">›</button>
-                    </div>
-                    <div class="cal-grid" id="att-grid"></div>
-                    <div class="legend">
-                      <span><span class="dotleg" style="background:var(--ok)"></span> Present</span>
-                      <span><span class="dotleg" style="background:var(--danger)"></span> Absent</span>
-                      <span><span class="dotleg" style="background:var(--amber)"></span> Today</span>
-                      <span><span class="dotleg" style="background:var(--line)"></span> Out of range</span>
-                    </div>
-                  </div>
-                </div>
-                <div id="att-msg"></div>
-              </div>
-              <div class="custom-scrollbar" id="custom-scrollbar-1"><div class="custom-scrollbar-thumb"></div></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- SLIDE 3: MY STAGE -->
-        <div class="carousel-slide" data-slide="2">
-          <div class="panel">
-            <div class="card-peek">
-              <div class="peek-icon">🧭</div>
-              <div class="peek-title">My Stage</div>
-              <div class="peek-hint">Tap to open</div>
-            </div>
-            <div class="card-full">
-              <button class="card-close" data-idx="2">✕</button>
-              <div class="card-scroll" id="card-scroll-2">
-                <h2>Where Did You Reach?</h2>
-                <div id="st-locked" class="locked-hint">Check in on the first card to unlock your stage tracker.</div>
-                <div id="st-body" style="display:none">
-                  <div id="st-holder"></div>
-                </div>
-                <div id="st-msg"></div>
-              </div>
-              <div class="custom-scrollbar" id="custom-scrollbar-2"><div class="custom-scrollbar-thumb"></div></div>
-            </div>
-          </div>
-        </div>
-
-      </div>
-      <div class="carousel-nav">
-        <button id="car-prev">‹</button>
-        <div class="carousel-dots">
-          <span class="dot active" data-idx="0"></span>
-          <span class="dot" data-idx="1"></span>
-          <span class="dot" data-idx="2"></span>
-        </div>
-        <button id="car-next">›</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ===================== DASHBOARD (admin-only) ===================== -->
-  <div id="tab-dashboard" style="display:none">
-    <div class="panel">
-      <h2>Filters</h2>
-      <div class="dash-filters">
-        <select id="dash-f-date"><option value="">All dates</option></select>
-        <select id="dash-f-shift"><option value="">All shifts</option></select>
-        <select id="dash-f-modality"><option value="">All modalities</option></select>
-        <select id="dash-f-queue"><option value="">All queues</option></select>
-        <select id="dash-f-pass"><option value="">All pass values</option></select>
-        <select id="dash-f-room"><option value="">All rooms</option></select>
-        <select id="dash-f-yubikey"><option value="">All yubikeys</option></select>
-        <button class="btn" id="dash-apply-btn">Apply</button>
-        <button class="btn secondary" id="dash-reset-btn">Reset</button>
-      </div>
-      <div id="dash-msg"></div>
-    </div>
-
-    <div class="panel dash-section">
-      <div class="dash-section-title">PC Cards <span class="count-note" id="dash-cards-count"></span></div>
-      <div class="dash-cards" id="dash-cards"><div class="empty">Loading…</div></div>
-    </div>
-
-    <div class="panel dash-section">
-      <div class="dash-section-title">
-        Row Detail <span class="count-note" id="dash-rows-count"></span>
-      </div>
-      <div class="grid" style="margin-bottom:10px">
-        <div><input id="dash-search" placeholder="🔍 Search name, email, PC, queue, ID..."></div>
-      </div>
-      <div class="dash-table-wrap">
-        <table>
-          <thead><tr>
-            <th>Timestamp</th><th>Shift</th><th>Unit</th><th>QTC Name</th><th>Yubikey Email</th>
-            <th>Labeler Name</th><th>PC No</th><th>Modality</th><th>Queue Name</th><th>ID</th>
-            <th>Object Count</th><th>Pass</th><th>Stage</th><th>Created At</th>
-          </tr></thead>
-          <tbody id="dash-rows-body"></tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="panel dash-section">
-      <div class="dash-section-title">Queue — Total Submits</div>
-      <div id="dash-queue-table"></div>
-    </div>
-
-    <div class="panel dash-section">
-      <div class="dash-section-title">Modality &amp; Pass</div>
-      <div id="dash-modality"></div>
-    </div>
-
-    <div class="panel dash-section">
-      <div class="dash-section-title">Object Count</div>
-      <div class="dash-objcount">
-        <div><div class="lab">Total Objects</div><div class="big" id="dash-obj-total">—</div></div>
-        <div><div class="lab">Avg / Task</div><div class="big" id="dash-obj-avg">—</div></div>
-      </div>
-    </div>
-
-    <div class="panel dash-section">
-      <div class="dash-section-title">Top QTC — Most Submits</div>
-      <div class="dash-chips" id="dash-top-qtc"></div>
-    </div>
-
-    <div class="panel dash-section">
-      <div class="dash-section-title">Top Labeler — Most Submits</div>
-      <div class="dash-chips" id="dash-top-labeler"></div>
-    </div>
-  </div>
-
-  <!-- ===================== QUALITY (admin-only) ===================== -->
-  <div id="tab-quality" style="display:none">
-    <div class="panel">
-      <h2>Filter</h2>
-      <div class="dash-filters">
-        <select id="qual-f-email"><option value="">All emails</option></select>
-        <button class="btn" id="qual-apply-btn">Apply</button>
-        <button class="btn secondary" id="qual-reset-btn">Reset</button>
-      </div>
-      <div id="qual-msg"></div>
-    </div>
-
-    <div class="qual-stat-card">
-      <div class="qs-icon">📊</div>
-      <div class="qs-num" id="qual-count">—</div>
-      <div class="qs-label">Tasks</div>
-    </div>
-
-    <div class="qual-history-title">
-      📋 Task History
-      <div class="bar"></div>
-    </div>
-    <div class="qual-cards" id="qual-cards"><div class="empty">Loading…</div></div>
-  </div>
-
-  <!-- ===================== TEAMS (admin-only) ===================== -->
-  <div id="tab-teams" style="display:none">
-    <div id="teams-holder"><div class="empty">Loading…</div></div>
-    <div id="teams-msg"></div>
-  </div>
-
-  <!-- ===================== ADMIN ===================== -->
-  <div id="tab-admin" style="display:none">
-    <div class="panel">
-      <h2>Register New Trainee</h2>
-      <div class="grid">
-        <div><label>National ID</label><input id="a-nid" placeholder="14 digits"></div>
-        <div><label>Name (optional, taken from the batch)</label><input id="a-name" placeholder="Full name"></div>
-        <div><label>PC</label><input id="a-pc" placeholder="e.g. PC-14"></div>
-        <div><label>Yubikey</label><input id="a-flash" placeholder="ME000000"></div>
-        <div><label>Room</label>
-          <select id="a-room"><option value="106">106</option><option value="102">102</option><option value="108">108</option><option value="sf">SF</option></select>
-        </div>
-        <div><label>Shift</label>
-          <select id="a-shift"><option value="M">M</option><option value="N">N</option><option value="ON">ON</option></select>
-        </div>
-      </div>
-      <div class="actions-row"><button class="btn" id="a-add-btn">Register</button></div>
-      <div id="a-msg"></div>
-    </div>
-    <div class="panel">
-      <h2>Attend Sheet (T1 / T2 / T3 / TP / 0)</h2>
-      <p style="font-size:12.5px;color:var(--muted);margin:0 0 12px">
-        Updates automatically every time someone checks in. Use this button to force a full
-        recompute for everyone (also useful right after setting up a daily trigger for
-        <code>syncAllAttendanceNow</code> in Apps Script, so missed days get marked "0").
-      </p>
-      <div class="actions-row"><button class="btn secondary" id="a-sync-btn">Sync Attendance Sheet</button></div>
-      <div id="a-sync-msg"></div>
-      <div class="actions-row" style="margin-top:8px">
-        <button class="btn secondary" id="a-format-btn">🎨 Colorize Attend Sheet</button>
-      </div>
-      <div id="a-format-msg"></div>
-      <div class="actions-row" style="margin-top:8px">
-        <button class="btn secondary" id="a-trigger-btn">⏰ Auto-mark absences every day</button>
-      </div>
-      <div id="a-trigger-msg"></div>
-    </div>
-    <div class="panel">
-      <h2>All Trainees</h2>
-      <div id="a-table-holder"><div class="empty">Loading…</div></div>
-    </div>
-  </div>
-
-</div>
-
-<!-- ===================== TEAM MODAL (PC details + comment) ===================== -->
-<div id="team-modal">
-  <div class="tm-box">
-    <button class="tm-close" id="tm-close">✕</button>
-    <div style="font-size:30px">🖥️</div>
-    <div class="tm-pc" id="tm-pc">—</div>
-    <div class="tm-status" id="tm-status">—</div>
-    <div class="tm-chip"><div class="lab">Yubikey</div><div class="val" id="tm-flash">—</div></div>
-    <div class="tm-chip"><div class="lab">Name</div><div class="val" id="tm-name">—</div></div>
-    <label>Day</label>
-    <div class="day-tabs" id="tm-days">
-      <button type="button" class="day-tab active" data-day="1">Day 1</button>
-      <button type="button" class="day-tab" data-day="2">Day 2</button>
-      <button type="button" class="day-tab" data-day="3">Day 3</button>
-    </div>
-    <label id="tm-comment-label">Comment — Day 1</label>
-    <textarea id="tm-comment" placeholder="اكتب تعليقك هنا..."></textarea>
-    <label id="tm-rating-label">Rating — Day 1</label>
-    <div class="stars" id="tm-stars">
-      <span data-v="1">★</span><span data-v="2">★</span><span data-v="3">★</span><span data-v="4">★</span><span data-v="5">★</span>
-    </div>
-    <label>Feedback</label>
-    <div class="fb-row" id="tm-feedback">
-      <button type="button" class="fb-btn" data-fb="Pass">Pass</button>
-      <button type="button" class="fb-btn" data-fb="Failed">Failed</button>
-      <button type="button" class="fb-btn" data-fb="Pending">Pending</button>
-      <button type="button" class="fb-btn" data-fb="Dropped out">Dropped out</button>
-    </div>
-    <label>Attendance</label>
-    <div class="att-summary" id="tm-att-summary">—</div>
-    <div class="att-chips" id="tm-att-chips"></div>
-    <label>Stage</label>
-    <div class="stage-box">
-      <div class="st-name" id="tm-stage-name">—</div>
-      <div class="st-sub" id="tm-stage-sub"></div>
-      <div class="stage-bar"><div id="tm-stage-bar" style="width:0%"></div></div>
-    </div>
-    <div class="actions-row" style="justify-content:center"><button class="btn" id="tm-save">Save</button></div>
-    <div id="tm-msg"></div>
-  </div>
-</div>
-
-<script>
-const STAGES = [
-  // ---- Phase 1 ----
-  {id:'p1_video', label:'Video Phase One', phase:'phase1'},
-  {id:'p1_vehicle', label:'Vehicle', phase:'phase1', link:'https://sites.google.com/meti.ai/training-material/home/unified-taxonomy/vehicles?pli=1&authuser=0'},
-  {id:'p1_motorcycle', label:'Motorcycle', phase:'phase1', link:'https://sites.google.com/meti.ai/training-material/home/unified-taxonomy/personal-vehicle/motorcycle'},
-  {id:'p1_task9661', label:'Task Day 1 (9661)', phase:'phase1'},
-  {id:'p1_task3200', label:'Task Day 1 (3200)', phase:'phase1'},
-  // ---- Phase 2 ----
-  {id:'p2_video', label:'Video Phase Two', phase:'phase2'},
-  {id:'p2_signs', label:'Signs', phase:'phase2', link:'https://sites.google.com/meti.ai/training-material/home/unified-taxonomy/inanimate-objects/signs'},
-  {id:'p2_dynamicobstacle', label:'Dynamic Obstacle', phase:'phase2', link:'https://sites.google.com/meti.ai/training-material/home/unified-taxonomy/inanimate-objects/dynamic-obstacle'},
-  {id:'p2_debris', label:'Debris', phase:'phase2', link:'https://sites.google.com/meti.ai/training-material/home/unified-taxonomy/inanimate-objects/debris'},
-  {id:'p2_cone', label:'Construction Cone', phase:'phase2', link:'https://sites.google.com/meti.ai/training-material/home/unified-taxonomy/inanimate-objects/construction-cone'},
-  {id:'p2_barrier', label:'Barrier', phase:'phase2', link:'https://sites.google.com/meti.ai/training-material/home/unified-taxonomy/inanimate-objects/barrier'},
-  {id:'p2_vegetation', label:'Vegetation', phase:'phase2', link:'https://sites.google.com/meti.ai/training-material/home/unified-taxonomy/shapeless-objects/vegetation'},
-  {id:'p2_vapor', label:'Vapor', phase:'phase2', link:'https://sites.google.com/meti.ai/training-material/home/unified-taxonomy/shapeless-objects/vapor'},
-  {id:'p2_task5747', label:'Task Day 2 (5747)', phase:'phase2'},
-  {id:'p2_task6464', label:'Task Day 2 (6464)', phase:'phase2'},
-  {id:'p2_task6470', label:'Task Day 2 (6470)', phase:'phase2'},
-  // ---- Phase 3 ----
-  {id:'p3_video', label:'Video Phase Three', phase:'phase3'},
-  {id:'p3_qaerrors', label:'Auto QA Errors', phase:'phase3', link:'https://sites.google.com/meti.ai/training-material/home/welcome-to-meti/practicing/auto-qa-errors'},
-  {id:'p3_mapless', label:'Mapless', phase:'phase3', link:'https://sites.google.com/meti.ai/training-material/home/queues/current-queue/sc3-full-scene-lidar'},
-  {id:'p3_signals', label:'Signals', phase:'phase3', link:'https://sites.google.com/meti.ai/training-material/home/queues/sc3-full-scene-new-version/vehicle-signals-labeling'},
-  {id:'p3_roadsign', label:'Road Sign', phase:'phase3', link:'https://sites.google.com/meti.ai/training-material/home/queues/sc3-full-scene-new-version/road-sign-labeling'},
-  {id:'p3_task7362', label:'Task Day 3 (7362)', phase:'phase3'},
+// Must stay in the same order as the frontend's STAGES array — used only
+// to stop a trainee from picking a stage that comes BEFORE their current
+// one (forward-only progress).
+const STAGE_ORDER = [
+  'p1_video','p1_vehicle','p1_motorcycle','p1_task9661','p1_task3200',
+  'p2_video','p2_signs','p2_dynamicobstacle','p2_debris','p2_cone','p2_barrier','p2_vegetation','p2_vapor','p2_task5747','p2_task6464','p2_task6470',
+  'p3_video','p3_qaerrors','p3_mapless','p3_signals','p3_roadsign','p3_task7362'
 ];
-const PHASE_LABELS = {phase1:'Phase 1', phase2:'Phase 2', phase3:'Phase 3'};
-const ROOMS = {'106':'106','102':'102','108':'108','sf':'SF'};
-const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
-function safeStr(v){ return (v===null||v===undefined) ? '' : String(v); }
-function stageIndex(id){ return STAGES.findIndex(s=>s.id===id); }
-function stageLabel(id){ const s=STAGES.find(x=>x.id===id); return s ? s.label : '—'; }
-function escapeHtml(str){ const d=document.createElement('div'); d.textContent=safeStr(str); return d.innerHTML; }
-
-// Secret admin token: issued by the server ONLY when "meti22" is typed in
-// Check In, stored on this device only, and sent with every admin call.
-const ADMIN_TOKEN_KEY = 'tracker_admin_token';
-let adminToken = '';
-try{ adminToken = localStorage.getItem(ADMIN_TOKEN_KEY) || ''; }catch(e){}
-function saveAdminToken(t){
-  adminToken = t || '';
-  try{ if(t) localStorage.setItem(ADMIN_TOKEN_KEY, t); else localStorage.removeItem(ADMIN_TOKEN_KEY); }catch(e){}
-}
-const ADMIN_FNS = ['isAdminUnlocked','lockAdmin','adminFormatAttendSheet','adminSyncAllAttendance',
-  'adminAddPerson','adminGetAllPeople','adminDeletePerson','adminGetTeams','adminSaveComment',
-  'getDashboardData','getQualityData','adminSetupDailyTrigger'];
-
-function runScript(fnName, ...args){
-  if(ADMIN_FNS.indexOf(fnName) !== -1) args.push(adminToken); // token is always the LAST argument
-  return new Promise((resolve, reject)=>{
-    google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[fnName](...args);
-  });
-}
-function errText(e){ return (e && e.message) ? e.message : String(e); }
-
-// ---------------- Custom scrollbar engine (JS-driven, works on every device) ----------------
-function updateCustomScrollbar(idx){
-  const scrollEl = document.getElementById('card-scroll-'+idx);
-  const track = document.getElementById('custom-scrollbar-'+idx);
-  if(!scrollEl || !track) return;
-  const thumb = track.querySelector('.custom-scrollbar-thumb');
-  const trackHeight = track.clientHeight;
-  const contentHeight = scrollEl.scrollHeight;
-  const visibleHeight = scrollEl.clientHeight;
-
-  if(trackHeight <= 0 || contentHeight <= visibleHeight + 2){
-    track.classList.remove('visible');
-    return;
-  }
-  track.classList.add('visible');
-  const thumbHeight = Math.max(30, (visibleHeight / contentHeight) * trackHeight);
-  const maxThumbTop = trackHeight - thumbHeight;
-  const maxScroll = contentHeight - visibleHeight;
-  const scrollRatio = maxScroll > 0 ? (scrollEl.scrollTop / maxScroll) : 0;
-  thumb.style.height = thumbHeight + 'px';
-  thumb.style.top = (maxThumbTop * scrollRatio) + 'px';
-}
-function updateAllCustomScrollbars(){ [0,1,2].forEach(updateCustomScrollbar); }
-
-[0,1,2].forEach(idx=>{
-  const scrollEl = document.getElementById('card-scroll-'+idx);
-  if(scrollEl) scrollEl.addEventListener('scroll', ()=> updateCustomScrollbar(idx));
-});
-window.addEventListener('resize', updateAllCustomScrollbars);
-
-// ---------------- Splash Screen ----------------
-(function initSplash(){
-  const splash = document.getElementById('splash');
-  if(!splash) return;
-  let dismissed = false;
-  const dismiss = ()=>{
-    if(dismissed) return;
-    dismissed = true;
-    splash.classList.add('hide');
-    document.body.classList.remove('has-splash');
-  };
-  setTimeout(dismiss, 3200); // auto-hide once the animation finishes
-  splash.addEventListener('click', dismiss); // tap anywhere to skip early
-})();
-
-// ---------------- Gradient Border Effect (one listener powers every card) ----------------
-// A single pointermove listener on the whole page updates --x / --y on
-// whichever .panel the pointer is currently over, so the glowing border
-// tracks the cursor. No listener is attached per-card.
-document.addEventListener('pointermove', (e)=>{
-  const panels = document.querySelectorAll('.panel');
-  panels.forEach(panel=>{
-    const rect = panel.getBoundingClientRect();
-    const inside = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
-    if(inside){
-      panel.style.setProperty('--x', (e.clientX - rect.left) + 'px');
-      panel.style.setProperty('--y', (e.clientY - rect.top) + 'px');
-      panel.classList.add('glow-active');
-    } else {
-      panel.classList.remove('glow-active');
-    }
-  });
-});
-
-// ---------------- Theme ----------------
-async function loadTheme(){
-  try{ const mode = await runScript('getTheme'); if(mode==='light') setTheme('light'); }catch(e){}
-}
-function setTheme(mode){
-  const isLight = mode==='light';
-  document.documentElement.classList.toggle('light', isLight);
-  document.getElementById('mode-icon').textContent = isLight ? '☀️' : '🌙';
-  document.getElementById('mode-label').textContent = isLight ? 'Day Mode' : 'Night Mode';
-}
-document.getElementById('mode-toggle').addEventListener('click', async ()=>{
-  const isLight = document.documentElement.classList.contains('light');
-  const newMode = isLight ? 'dark' : 'light';
-  setTheme(newMode);
-  try{ await runScript('setTheme', newMode); }catch(e){}
-});
-
-// ---------------- Admin unlock ----------------
-let userIsAdmin = false;
-async function loadAdminStatus(){
-  userIsAdmin = false;
-  if(adminToken){
-    try{ userIsAdmin = !!(await runScript('isAdminUnlocked')); }catch(e){ userIsAdmin = false; }
-    if(!userIsAdmin) saveAdminToken(''); // token no longer valid on the server
-  }
-  applyAdminUi();
-}
-function applyAdminUi(){
-  document.getElementById('admin-tab-btn').style.display = userIsAdmin ? 'inline-block' : 'none';
-  document.getElementById('dashboard-tab-btn').style.display = userIsAdmin ? 'inline-block' : 'none';
-  document.getElementById('quality-tab-btn').style.display = userIsAdmin ? 'inline-block' : 'none';
-  document.getElementById('teams-tab-btn').style.display = userIsAdmin ? 'inline-block' : 'none';
-  const btn = document.getElementById('edit-mode-btn');
-  btn.style.display = userIsAdmin ? 'flex' : 'none';
-  btn.classList.toggle('admin-on', userIsAdmin);
-  document.getElementById('edit-mode-label').textContent = userIsAdmin ? 'Admin: ON' : 'Admin';
-  const activeTab = (document.querySelector('.tab-btn.active') || {}).dataset;
-  if(!userIsAdmin && activeTab && activeTab.tab !== 'carousel'){
-    switchTab('carousel');
-  }
-}
-document.getElementById('edit-mode-btn').addEventListener('click', async ()=>{
-  if(!userIsAdmin) return;
-  try{ await runScript('lockAdmin'); }catch(e){}
-  saveAdminToken('');
-  userIsAdmin = false; applyAdminUi();
-});
-
-// ---------------- Tabs (Carousel vs Dashboard vs Quality vs Teams vs Admin) ----------------
-function switchTab(tab){
-  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active', b.getAttribute('data-tab')===tab));
-  ['carousel','dashboard','quality','teams','admin'].forEach(t=>{
-    document.getElementById('tab-'+t).style.display = (t===tab) ? 'block' : 'none';
-  });
-  if(tab==='admin') loadAdminTable();
-  if(tab==='dashboard') loadDashboard();
-  if(tab==='quality') loadQuality();
-  if(tab==='teams') loadTeams();
-  autoLast[tab] = Date.now();
-}
-document.querySelectorAll('.tab-btn').forEach(btn=>{
-  btn.addEventListener('click', ()=> switchTab(btn.getAttribute('data-tab')));
-});
-
-// ---------------- 3D Glass Carousel engine ----------------
-let carouselActive = 0;
-const CAROUSEL_SLIDE_COUNT = 3;
-
-function updateCarousel(){
-  document.querySelectorAll('.carousel-slide').forEach(slide=>{
-    const i = parseInt(slide.getAttribute('data-slide'), 10);
-    const offset = i - carouselActive;
-    slide.style.transform = `translateX(${offset*88}%) translateZ(${-Math.abs(offset)*260}px) rotateY(${offset*-30}deg)`;
-    slide.style.opacity = offset === 0 ? '1' : '0.35';
-    slide.style.filter = offset === 0 ? 'none' : 'blur(1.5px)';
-    slide.style.zIndex = slide.classList.contains('expanded') ? '40' : String(10 - Math.abs(offset));
-    slide.style.pointerEvents = offset === 0 ? 'auto' : 'none';
-  });
-  document.querySelectorAll('.carousel-dots .dot').forEach((d,i)=> d.classList.toggle('active', i===carouselActive));
+// Stage ids that were removed from the list. Trainees who still have one stored
+// in the sheet are shown at the first stage of that phase instead of "nothing".
+const LEGACY_STAGE_MAP = {
+  p1_gulp: 'p1_vehicle', p1_phaseone: 'p1_vehicle', p1_task9106: 'p1_vehicle',
+  p2_phasetwo: 'p2_signs', p2_inanimate: 'p2_signs', p2_pedestrian: 'p2_signs', p2_personalvehicle: 'p2_signs',
+  p3_autogrounding: 'p3_qaerrors', p3_emv: 'p3_qaerrors', p3_zone: 'p3_qaerrors', p3_shapeless: 'p3_qaerrors',
+  // removed Mapless / ME4 phases -> last stage that is left
+  mp_highwaylidar: 'p3_task7362', mp_techhighway: 'p3_task7362', mp_highway: 'p3_task7362', mp_gradesep: 'p3_task7362', mp_taskmapless: 'p3_task7362',
+  me4_em4lidar: 'p3_task7362', me4_roadsign: 'p3_task7362', me4_vehiclesignals: 'p3_task7362', me4_commonmistakes: 'p3_task7362', me4_commonmistakes2: 'p3_task7362'
+};
+function normalizeStage_(id) {
+  const v = toStr_(id);
+  return LEGACY_STAGE_MAP[v] || v;
 }
 
-// ---------------- Card expand / collapse (small badge -> full card) ----------------
-function collapseAllCards(){
-  document.querySelectorAll('.carousel-slide').forEach(s=>s.classList.remove('expanded'));
-  document.getElementById('carousel').classList.remove('has-expanded');
-}
-function expandCard(idx){
-  collapseAllCards();
-  const slide = document.querySelector('.carousel-slide[data-slide="'+idx+'"]');
-  if(slide){
-    slide.classList.add('expanded');
-    document.getElementById('carousel').classList.add('has-expanded');
-  }
-  updateCarousel();
-  updateCustomScrollbar(idx);
-  setTimeout(()=> updateCustomScrollbar(idx), 450); // re-measure once the expand transition finishes
-}
-document.querySelectorAll('.card-peek').forEach(peek=>{
-  peek.addEventListener('click', ()=>{
-    const idx = parseInt(peek.closest('.carousel-slide').getAttribute('data-slide'), 10);
-    goToSlide(idx);
-    expandCard(idx);
-  });
-});
-document.querySelectorAll('.card-close').forEach(btn=>{
-  btn.addEventListener('click', (e)=>{
-    e.stopPropagation();
-    collapseAllCards();
-    updateCarousel();
-  });
-});
-
-function goToSlide(i){
-  carouselActive = Math.max(0, Math.min(CAROUSEL_SLIDE_COUNT-1, i));
-  collapseAllCards();
-  updateCarousel();
-}
-document.getElementById('car-prev').addEventListener('click', ()=> goToSlide(carouselActive - 1));
-document.getElementById('car-next').addEventListener('click', ()=> goToSlide(carouselActive + 1));
-document.querySelectorAll('.carousel-dots .dot').forEach(dot=>{
-  dot.addEventListener('click', ()=> goToSlide(parseInt(dot.getAttribute('data-idx'), 10)));
-});
-document.getElementById('ci-goto-attendance').addEventListener('click', ()=>{ goToSlide(1); expandCard(1); });
-
-// basic swipe support for mobile
-(function enableSwipe(){
-  const el = document.getElementById('carousel');
-  let startX = null;
-  el.addEventListener('touchstart', e=>{ startX = e.touches[0].clientX; }, {passive:true});
-  el.addEventListener('touchend', e=>{
-    if(startX === null) return;
-    const dx = e.changedTouches[0].clientX - startX;
-    if(Math.abs(dx) > 50){ dx < 0 ? goToSlide(carouselActive+1) : goToSlide(carouselActive-1); }
-    startX = null;
-  }, {passive:true});
-})();
-
-updateCarousel();
-
-// ---------------- Shared National ID (typed once, used by all 3 cards) ----------------
-const LAST_NID_KEY = 'tracker_last_nid';
-let currentNationalId = null;
-
-document.getElementById('ci-start-btn').addEventListener('click', async ()=>{
-  const nid = document.getElementById('ci-nid').value.trim();
-  const msgEl = document.getElementById('ci-msg');
-  if(!nid){ msgEl.innerHTML = '<div class="msg err">Please enter your National ID first.</div>'; return; }
-
-  const btn = document.getElementById('ci-start-btn');
-  btn.disabled = true; btn.textContent = '...';
-  msgEl.innerHTML = '';
-
-  try{
-    const res = await runScript('checkIn', nid);
-    if(res.success && res.needPassword){
-      pendingAdminUser = nid;
-      document.getElementById('ci-pass-wrap').style.display = 'block';
-      document.getElementById('ci-pass').value = '';
-      document.getElementById('ci-pass').focus();
-      msgEl.innerHTML = '<div class="msg ok">Enter your password to continue.</div>';
-      updateCustomScrollbar(0);
-    } else if(!res.success){
-      msgEl.innerHTML = '<div class="msg err">' + escapeHtml(res.message) + '</div>';
-    } else {
-      hideAdminPassBox();
-      currentNationalId = nid;
-      try{ localStorage.setItem(LAST_NID_KEY, nid); }catch(e){}
-      showCheckinCard(res.person);
-      unlockOtherCards();
-      loadAttendance();   // preload silently so slide 2 is ready instantly
-      loadStagePage();    // preload silently so slide 3 is ready instantly
-    }
-  }catch(e){
-    msgEl.innerHTML = '<div class="msg err">' + escapeHtml(errText(e)) + '</div>';
-  }
-  btn.disabled = false; btn.textContent = 'Start Tracker';
-});
-
-// ---- Admin login (user name typed in the ID box + password) ----
-let pendingAdminUser = null;
-function hideAdminPassBox(){
-  pendingAdminUser = null;
-  document.getElementById('ci-pass-wrap').style.display = 'none';
-  document.getElementById('ci-pass').value = '';
-  updateCustomScrollbar(0);
-}
-document.getElementById('ci-pass-cancel').addEventListener('click', ()=>{
-  hideAdminPassBox();
-  document.getElementById('ci-msg').innerHTML = '';
-});
-document.getElementById('ci-pass').addEventListener('keydown', (e)=>{
-  if(e.key === 'Enter') document.getElementById('ci-login-btn').click();
-});
-document.getElementById('ci-login-btn').addEventListener('click', async ()=>{
-  if(!pendingAdminUser) return;
-  const msgEl = document.getElementById('ci-msg');
-  const pass = document.getElementById('ci-pass').value;
-  if(!pass){ msgEl.innerHTML = '<div class="msg err">Please enter your password.</div>'; return; }
-  const btn = document.getElementById('ci-login-btn');
-  btn.disabled = true; btn.textContent = '...';
-  try{
-    const res = await runScript('adminLogin', pendingAdminUser, pass);
-    if(res && res.success){
-      saveAdminToken(res.token);
-      userIsAdmin = true;
-      applyAdminUi();
-      loadAdminTable();
-      document.getElementById('ci-nid').value = '';
-      hideAdminPassBox();
-      msgEl.innerHTML = '<div class="msg ok">Admin unlocked ✓</div>';
-    } else {
-      msgEl.innerHTML = '<div class="msg err">' + escapeHtml((res && res.message) || 'Login failed.') + '</div>';
-    }
-  }catch(e){
-    msgEl.innerHTML = '<div class="msg err">' + escapeHtml(errText(e)) + '</div>';
-  }
-  btn.disabled = false; btn.textContent = 'Login';
-});
-
-// ---- Register (new trainee sign-up -> "log" sheet) ----
-function showRegisterForm(show){
-  document.getElementById('register-form').style.display = show ? 'block' : 'none';
-  document.getElementById('checkin-form').style.display = show ? 'none' : 'block';
-  document.getElementById('ci-title').textContent = show ? 'Login' : 'Check In For Today';
-  document.getElementById('rg-msg').innerHTML = '';
-  updateCustomScrollbar(0);
-}
-document.getElementById('ci-register-link').addEventListener('click', ()=>{
-  hideAdminPassBox();
-  document.getElementById('ci-msg').innerHTML = '';
-  showRegisterForm(true);
-});
-document.getElementById('rg-back').addEventListener('click', ()=> showRegisterForm(false));
-
-document.getElementById('rg-submit').addEventListener('click', async ()=>{
-  const data = {
-    nationalId: document.getElementById('rg-nid').value.replace(/\s/g,''),
-    name: document.getElementById('rg-name').value.trim(),
-    phone: document.getElementById('rg-phone').value.trim(),
-    gmail: document.getElementById('rg-gmail').value.trim(),
-    shift: document.getElementById('rg-shift').value,
-    location: document.getElementById('rg-location').value
-  };
-  const msgEl = document.getElementById('rg-msg');
-  if(!/^\d{14}$/.test(data.nationalId)){ msgEl.innerHTML = '<div class="msg err">National ID must be 14 digits.</div>'; return; }
-  if(data.name.length < 3){ msgEl.innerHTML = '<div class="msg err">Please enter your full name.</div>'; return; }
-  if(!/^\+?\d{10,15}$/.test(data.phone.replace(/[\s-]/g,''))){ msgEl.innerHTML = '<div class="msg err">Please enter a valid phone number.</div>'; return; }
-  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.gmail)){ msgEl.innerHTML = '<div class="msg err">Please enter a valid Gmail address.</div>'; return; }
-  if(!data.shift){ msgEl.innerHTML = '<div class="msg err">Please choose a shift.</div>'; return; }
-  if(!data.location){ msgEl.innerHTML = '<div class="msg err">Please choose a location.</div>'; return; }
-
-  const btn = document.getElementById('rg-submit');
-  btn.disabled = true; btn.textContent = '...';
-  msgEl.innerHTML = '';
-  try{
-    const res = await runScript('registerTrainee', data);
-    if(res && res.success){
-      ['rg-nid','rg-name','rg-phone','rg-gmail','rg-shift','rg-location'].forEach(id=>{ document.getElementById(id).value=''; });
-      document.getElementById('ci-nid').value = data.nationalId; // ready for Check In once activated
-      showRegisterForm(false);
-      document.getElementById('ci-msg').innerHTML = '<div class="msg ok">Registered ✓ The admin will activate your account, then you can check in.</div>';
-    } else {
-      msgEl.innerHTML = '<div class="msg err">' + escapeHtml((res && res.message) || 'Registration failed.') + '</div>';
-    }
-  }catch(e){
-    msgEl.innerHTML = '<div class="msg err">' + escapeHtml(errText(e)) + '</div>';
-  }
-  btn.disabled = false; btn.textContent = 'Register';
-});
-
-function showCheckinCard(person){
-  document.getElementById('checkin-form').style.display = 'none';
-  document.getElementById('checkin-card').style.display = 'block';
-  document.getElementById('ci-name').textContent = person.name || '—';
-  document.getElementById('ci-pc').textContent = person.pc || '—';
-  document.getElementById('ci-flash').textContent = person.flash || '—';
-  document.getElementById('ci-room').textContent = ROOMS[person.room] || person.room || '—';
-  document.getElementById('ci-day').textContent = person.dayNumber ? ('Day ' + person.dayNumber) : '—';
-  updateCustomScrollbar(0);
-}
-
-function unlockOtherCards(){
-  document.getElementById('att-locked').style.display = 'none';
-  document.getElementById('att-body').style.display = 'block';
-  document.getElementById('st-locked').style.display = 'none';
-  document.getElementById('st-body').style.display = 'block';
-}
-function relockOtherCards(){
-  document.getElementById('att-locked').style.display = 'block';
-  document.getElementById('att-body').style.display = 'none';
-  document.getElementById('st-locked').style.display = 'block';
-  document.getElementById('st-body').style.display = 'none';
-  document.getElementById('att-grid').innerHTML = '';
-  document.getElementById('st-holder').innerHTML = '';
-}
-
-document.getElementById('ci-switch').addEventListener('click', ()=>{
-  currentNationalId = null;
-  document.getElementById('checkin-form').style.display = 'block';
-  document.getElementById('checkin-card').style.display = 'none';
-  document.getElementById('ci-nid').value = '';
-  document.getElementById('ci-msg').innerHTML = '';
-  relockOtherCards();
-  goToSlide(0);
-});
-
-// prefill last used National ID for convenience (still requires tapping Start Tracker)
-(function prefill(){
-  try{
-    const last = localStorage.getItem(LAST_NID_KEY);
-    if(last) document.getElementById('ci-nid').value = last;
-  }catch(e){}
-})();
-
-// ---------------- SLIDE 2: Attendance calendar (uses currentNationalId) ----------------
-let attCurrentYear = new Date().getFullYear();
-let attCurrentMonth = new Date().getMonth() + 1; // 1-12
-
-async function loadAttendance(){
-  if(!currentNationalId) return;
-  const msgEl = document.getElementById('att-msg');
-  msgEl.innerHTML = '';
-  try{
-    const res = await runScript('getAttendanceMonth', currentNationalId, attCurrentYear, attCurrentMonth);
-    if(!res.success){
-      msgEl.innerHTML = '<div class="msg err">' + escapeHtml(res.message) + '</div>';
-      return;
-    }
-    renderCalendar(res);
-  }catch(e){
-    msgEl.innerHTML = '<div class="msg err">' + escapeHtml(errText(e)) + '</div>';
-  }
-}
-document.getElementById('att-prev').addEventListener('click', ()=>{
-  attCurrentMonth--; if(attCurrentMonth < 1){ attCurrentMonth = 12; attCurrentYear--; }
-  loadAttendance();
-});
-document.getElementById('att-next').addEventListener('click', ()=>{
-  attCurrentMonth++; if(attCurrentMonth > 12){ attCurrentMonth = 1; attCurrentYear++; }
-  loadAttendance();
-});
-
-function renderCalendar(res){
-  document.getElementById('att-title').textContent = MONTH_NAMES[attCurrentMonth-1] + ' ' + attCurrentYear + ' — ' + (res.person.name || '');
-  const grid = document.getElementById('att-grid');
-  grid.innerHTML = res.days.map(d=>{
-    return `<div class="cal-day ${d.status}">${d.day}</div>`;
-  }).join('');
-  updateCustomScrollbar(1);
-}
-
-// ---------------- SLIDE 3: Stage picker (uses currentNationalId) ----------------
-let stCurrentPerson = null;
-
-async function loadStagePage(){
-  if(!currentNationalId) return;
-  const msgEl = document.getElementById('st-msg');
-  msgEl.innerHTML = '';
-  try{
-    const res = await runScript('lookupPerson', currentNationalId);
-    if(!res.success){
-      msgEl.innerHTML = '<div class="msg err">' + escapeHtml(res.message) + '</div>';
-      return;
-    }
-    stCurrentPerson = res.person;
-    renderStagePicker();
-  }catch(e){
-    msgEl.innerHTML = '<div class="msg err">' + escapeHtml(errText(e)) + '</div>';
-  }
-}
-
-function renderStagePicker(){
-  const currentIdx = stageIndex(stCurrentPerson.stage);
-  const blocks = Object.keys(PHASE_LABELS).map(phaseKey=>{
-    const opts = STAGES.filter(s=>s.phase===phaseKey).map(s=>{
-      const idx = stageIndex(s.id);
-      let cls = 'stage-opt';
-      if(idx < currentIdx) cls += ' done';
-      else if(idx === currentIdx) cls += ' current';
-      const icon = idx < currentIdx ? ' ✓' : (s.link ? ' 🔗' : '');
-      return `<div class="${cls}" data-stage="${s.id}" data-idx="${idx}">${s.label}${icon}</div>`;
-    }).join('');
-    return `<div class="phase-block">
-      <div class="phase-title ${phaseKey}">${PHASE_LABELS[phaseKey]}</div>
-      <div class="stage-picker">${opts}</div>
-    </div>`;
-  }).join('');
-
-  document.getElementById('st-holder').innerHTML = `
-    <div style="margin-top:10px;font-size:13px;color:var(--muted)">
-      Current stage: <strong style="color:var(--amber)">${stageLabel(stCurrentPerson.stage)}</strong>
-    </div>
-    ${blocks}
-  `;
-  updateCustomScrollbar(2);
-
-  document.getElementById('st-holder').querySelectorAll('.stage-opt').forEach(opt=>{
-    opt.addEventListener('click', async ()=>{
-      const stageId = opt.getAttribute('data-stage');
-      const stageObj = STAGES.find(s=>s.id===stageId);
-      const idx = parseInt(opt.getAttribute('data-idx'), 10);
-      const currentIdx = stageIndex(stCurrentPerson.stage);
-
-      // Jumping to any stage (forward OR backward) is allowed — tap a
-      // completed one to go back to it, or a future one to advance.
-      if(idx !== currentIdx){
-        try{
-          const res = await runScript('advanceStage', stCurrentPerson.nationalId, stageId);
-          if(res.success){
-            stCurrentPerson.stage = stageId;
-            renderStagePicker();
-          } else {
-            alert(res.message || 'Something went wrong.');
-          }
-        }catch(e){ alert('Error: ' + errText(e)); }
-      }
-      if(stageObj.link) window.open(stageObj.link, '_blank');
-    });
-  });
-}
-
-// ---------------- ADMIN ----------------
-document.getElementById('a-add-btn').addEventListener('click', async ()=>{
-  const nationalId = document.getElementById('a-nid').value.trim();
-  const name = document.getElementById('a-name').value.trim();
-  const pc = document.getElementById('a-pc').value.trim();
-  const flash = document.getElementById('a-flash').value.trim();
-  const room = document.getElementById('a-room').value;
-  const shift = document.getElementById('a-shift').value;
-  const msgEl = document.getElementById('a-msg');
-
-  if(!nationalId){ msgEl.innerHTML = '<div class="msg err">National ID is required.</div>'; return; }
-
-  const btn = document.getElementById('a-add-btn');
-  btn.disabled = true;
-  msgEl.innerHTML = '';
-  try{
-    await runScript('adminAddPerson', { nationalId, name, pc, flash, room, shift });
-    msgEl.innerHTML = '<div class="msg ok">Registered successfully ✓</div>';
-    ['a-nid','a-name','a-pc','a-flash'].forEach(id=>document.getElementById(id).value='');
-    loadAdminTable();
-    setTimeout(()=>{ msgEl.innerHTML=''; }, 2500);
-  }catch(e){
-    msgEl.innerHTML = '<div class="msg err">' + escapeHtml(errText(e)) + '</div>';
-  }
-  btn.disabled = false;
-});
-
-document.getElementById('a-sync-btn').addEventListener('click', async ()=>{
-  const btn = document.getElementById('a-sync-btn');
-  const msgEl = document.getElementById('a-sync-msg');
-  btn.disabled = true; btn.textContent = 'Syncing…';
-  msgEl.innerHTML = '';
-  try{
-    const res = await runScript('adminSyncAllAttendance');
-    msgEl.innerHTML = '<div class="msg ok">Synced ' + res.count + ' trainee(s) ✓' + (res.dropped ? ' · ' + res.dropped + ' marked Dropped out' : '') + '</div>';
-  }catch(e){
-    msgEl.innerHTML = '<div class="msg err">' + escapeHtml(errText(e)) + '</div>';
-  }
-  btn.disabled = false; btn.textContent = 'Sync Attendance Sheet';
-});
-
-document.getElementById('a-format-btn').addEventListener('click', async ()=>{
-  const btn = document.getElementById('a-format-btn');
-  const msgEl = document.getElementById('a-format-msg');
-  btn.disabled = true; btn.textContent = 'Colorizing…';
-  msgEl.innerHTML = '';
-  try{
-    const res = await runScript('adminFormatAttendSheet');
-    msgEl.innerHTML = '<div class="msg ok">Colorized ' + res.dayColCount + ' day column(s) ✓</div>';
-  }catch(e){
-    msgEl.innerHTML = '<div class="msg err">' + escapeHtml(errText(e)) + '</div>';
-  }
-  btn.disabled = false; btn.textContent = '🎨 Colorize Attend Sheet';
-});
-
-document.getElementById('a-trigger-btn').addEventListener('click', async ()=>{
-  const btn = document.getElementById('a-trigger-btn');
-  const msgEl = document.getElementById('a-trigger-msg');
-  btn.disabled = true;
-  msgEl.innerHTML = '';
-  try{
-    const res = await runScript('adminSetupDailyTrigger');
-    msgEl.innerHTML = '<div class="msg ok">' + (res.already ? 'Auto-mark is already on ✓' : 'Auto-mark is on ✓ (every night ~00:30, and instantly when a row in Attend reaches two 0)') + '</div>';
-  }catch(e){
-    msgEl.innerHTML = '<div class="msg err">' + escapeHtml(errText(e)) + '</div>';
-  }
-  btn.disabled = false;
-});
-
-async function loadAdminTable(){
-  const holder = document.getElementById('a-table-holder');
-  try{
-    const people = await runScript('adminGetAllPeople');
-    if(!people || people.length === 0){
-      holder.innerHTML = '<div class="empty">No one registered yet.</div>';
-      return;
-    }
-    const rows = people.map(p=>`
-      <tr>
-        <td>${escapeHtml(p.name)}</td>
-        <td class="mono">${escapeHtml(p.nationalId)}</td>
-        <td class="mono">${escapeHtml(p.pc)}</td>
-        <td class="mono">${escapeHtml(p.flash)}</td>
-        <td>${ROOMS[p.room] || escapeHtml(p.room)}</td>
-        <td>${escapeHtml(stageLabel(p.stage))}</td>
-        <td>${p.dayNumber ? 'Day '+p.dayNumber : '—'}</td>
-        <td><span class="badge ${p.todayStatus}">${p.todayStatus==='present'?'Present':'Absent'}</span></td>
-        <td><button class="del-btn" data-nid="${escapeHtml(p.nationalId)}">✕</button></td>
-      </tr>`).join('');
-    holder.innerHTML = `<table>
-      <thead><tr><th>Name</th><th>National ID</th><th>PC</th><th>Yubikey</th><th>Room</th><th>Stage</th><th>Day</th><th>Today</th><th></th></tr></thead>
-      <tbody>${rows}</tbody></table>`;
-    holder.querySelectorAll('.del-btn').forEach(btn=>{
-      btn.addEventListener('click', async ()=>{
-        if(!confirm('Are you sure you want to delete this person?')) return;
-        try{ await runScript('adminDeletePerson', btn.getAttribute('data-nid')); loadAdminTable(); }
-        catch(e){ alert('Error: ' + errText(e)); }
-      });
-    });
-  }catch(e){
-    holder.innerHTML = '<div class="empty">' + escapeHtml(errText(e)) + '</div>';
-  }
-}
-
-// ---------------- DASHBOARD (admin-only) ----------------
-let dashFilterOptionsLoaded = false;
-let dashCurrentRows = []; // rows currently rendered in the Row Detail table (for client-side search)
-
-function fillSelect_(selectEl, values, placeholderText){
-  const current = selectEl.value;
-  selectEl.innerHTML = '<option value="">'+escapeHtml(placeholderText)+'</option>' +
-    values.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
-  if(values.includes(current)) selectEl.value = current;
-}
-
-function getDashboardFilters_(){
-  return {
-    date: document.getElementById('dash-f-date').value,
-    shift: document.getElementById('dash-f-shift').value,
-    modality: document.getElementById('dash-f-modality').value,
-    queueName: document.getElementById('dash-f-queue').value,
-    pass: document.getElementById('dash-f-pass').value,
-    unit: document.getElementById('dash-f-room').value,
-    yubikeyEmail: document.getElementById('dash-f-yubikey').value
-  };
-}
-
-async function loadDashboard(){
-  const msgEl = document.getElementById('dash-msg');
-  msgEl.innerHTML = '';
-  try{
-    const res = await runScript('getDashboardData', getDashboardFilters_());
-    if(!res.success){ msgEl.innerHTML = '<div class="msg err">Failed to load dashboard.</div>'; return; }
-
-    if(!dashFilterOptionsLoaded){
-      fillSelect_(document.getElementById('dash-f-date'), res.filterOptions.dates, 'All dates');
-      fillSelect_(document.getElementById('dash-f-shift'), res.filterOptions.shifts, 'All shifts');
-      fillSelect_(document.getElementById('dash-f-modality'), res.filterOptions.modalities, 'All modalities');
-      fillSelect_(document.getElementById('dash-f-queue'), res.filterOptions.queues, 'All queues');
-      fillSelect_(document.getElementById('dash-f-pass'), res.filterOptions.passValues, 'All pass values');
-      fillSelect_(document.getElementById('dash-f-room'), res.filterOptions.rooms, 'All rooms');
-      fillSelect_(document.getElementById('dash-f-yubikey'), res.filterOptions.yubikeys, 'All yubikeys');
-      dashFilterOptionsLoaded = true;
-    }
-
-    renderDashCards_(res.pcCards, res.totalRows);
-    dashCurrentRows = res.rows;
-    renderDashRows_(dashCurrentRows, res.totalRows, res.rowsCapped);
-    renderDashQueueTable_(res.queueTotals);
-    renderDashModality_(res.modalityPass);
-    document.getElementById('dash-obj-total').textContent = res.objectCount.total.toLocaleString();
-    document.getElementById('dash-obj-avg').textContent = res.objectCount.avgPerTask.toFixed(1);
-    renderDashChips_('dash-top-qtc', res.topQTC);
-    renderDashChips_('dash-top-labeler', res.topLabeler);
-  }catch(e){
-    msgEl.innerHTML = '<div class="msg err">' + escapeHtml(errText(e)) + '</div>';
-  }
-}
-
-document.getElementById('dash-apply-btn').addEventListener('click', loadDashboard);
-document.getElementById('dash-reset-btn').addEventListener('click', ()=>{
-  ['dash-f-date','dash-f-shift','dash-f-modality','dash-f-queue','dash-f-pass','dash-f-room','dash-f-yubikey'].forEach(id=>{ document.getElementById(id).value=''; });
-  document.getElementById('dash-search').value = '';
-  loadDashboard();
-});
-document.getElementById('dash-search').addEventListener('input', (e)=>{
-  const q = e.target.value.trim().toLowerCase();
-  if(!q){ renderDashRows_(dashCurrentRows, dashCurrentRows.length, false); return; }
-  const filtered = dashCurrentRows.filter(r =>
-    (r.labelerName||'').toLowerCase().includes(q) ||
-    (r.yubikeyEmail||'').toLowerCase().includes(q) ||
-    (r.pcNo||'').toLowerCase().includes(q) ||
-    (r.queueName||'').toLowerCase().includes(q) ||
-    (r.qtcName||'').toLowerCase().includes(q) ||
-    (r.id||'').toLowerCase().includes(q)
-  );
-  renderDashRows_(filtered, filtered.length, false);
-});
-
-function renderDashCards_(cards, totalRows){
-  document.getElementById('dash-cards-count').textContent = cards.length + ' PCs · ' + totalRows + ' rows';
-  const holder = document.getElementById('dash-cards');
-  if(!cards.length){ holder.innerHTML = '<div class="empty">No data for this filter.</div>'; return; }
-  holder.innerHTML = cards.map(c => `
-    <div class="dash-card">
-      <div class="dc-top">
-        <span class="dc-pc">${escapeHtml(c.pcNo)}</span>
-        <span class="dc-badge">${c.total}</span>
-      </div>
-      <div class="dc-name">${escapeHtml(c.labelerName || '—')}</div>
-      <div class="dc-email">${escapeHtml(c.yubikeyEmail || '—')}</div>
-      <div>${c.queues.map(q => `<span class="dc-queue">${escapeHtml(q.queueName)} ${q.count}</span>`).join('')}</div>
-    </div>
-  `).join('');
-}
-
-function renderDashRows_(rows, totalRows, capped){
-  document.getElementById('dash-rows-count').textContent = rows.length + (capped ? (' shown of ' + totalRows) : ' rows shown');
-  const body = document.getElementById('dash-rows-body');
-  if(!rows.length){ body.innerHTML = '<tr><td colspan="14" class="empty">No rows.</td></tr>'; return; }
-  body.innerHTML = rows.map(r => `
-    <tr>
-      <td>${escapeHtml(r.timestamp)}</td>
-      <td>${escapeHtml(r.shift)}</td>
-      <td>${escapeHtml(r.unit)}</td>
-      <td>${escapeHtml(r.qtcName)}</td>
-      <td>${escapeHtml(r.yubikeyEmail)}</td>
-      <td>${escapeHtml(r.labelerName)}</td>
-      <td>${escapeHtml(r.pcNo)}</td>
-      <td>${escapeHtml(r.modality)}</td>
-      <td>${escapeHtml(r.queueName)}</td>
-      <td class="mono">${escapeHtml(r.id)}</td>
-      <td>${r.objectCount}</td>
-      <td><span class="dash-badge-pass ${escapeHtml(r.pass)}">${escapeHtml(r.pass)}</span></td>
-      <td>${escapeHtml(r.stage)}</td>
-      <td>${escapeHtml(r.createdAt)}</td>
-    </tr>
-  `).join('');
-}
-
-function renderDashQueueTable_(qt){
-  const holder = document.getElementById('dash-queue-table');
-  if(!qt.rows.length){ holder.innerHTML = '<div class="empty">No data.</div>'; return; }
-  const passHeaders = qt.passColumns.map(p => `<th>${escapeHtml(p)}</th>`).join('');
-  const bodyRows = qt.rows.map(r => `
-    <tr>
-      <td class="qn">${escapeHtml(r.queueName)}</td>
-      ${qt.passColumns.map(p => `<td>${r.counts[p]}</td>`).join('')}
-      <td><strong>${r.total}</strong></td>
-    </tr>
-  `).join('');
-  const totalRow = `
-    <tr>
-      <td>Total</td>
-      ${qt.passColumns.map(p => `<td>${qt.grandTotal.counts[p]}</td>`).join('')}
-      <td>${qt.grandTotal.total}</td>
-    </tr>
-  `;
-  holder.innerHTML = `<table class="dash-qtable">
-    <thead><tr><th>Queue</th>${passHeaders}<th>Total</th></tr></thead>
-    <tbody>${bodyRows}${totalRow}</tbody>
-  </table>`;
-}
-
-function renderDashModality_(items){
-  const holder = document.getElementById('dash-modality');
-  if(!items.length){ holder.innerHTML = '<div class="empty">No data.</div>'; return; }
-  holder.innerHTML = items.map(it => `
-    <div class="dash-modrow">
-      <div class="mr-top"><span>${escapeHtml(it.label)}</span><span>${it.count} · ${it.pct}%</span></div>
-      <div class="mr-bar"><div class="mr-fill" style="width:${it.pct}%"></div></div>
-    </div>
-  `).join('');
-}
-
-function renderDashChips_(holderId, items){
-  const holder = document.getElementById(holderId);
-  if(!items.length){ holder.innerHTML = '<div class="empty">No data.</div>'; return; }
-  holder.innerHTML = items.map(it => `<span class="dash-chip">${escapeHtml(it.name)}<b>${it.count}</b></span>`).join('');
-}
-
-// ---------------- QUALITY (admin-only) ----------------
-let qualFilterOptionsLoaded = false;
-
-function getQualityFilters_(){
-  return { email: document.getElementById('qual-f-email').value };
-}
-
-async function loadQuality(){
-  const msgEl = document.getElementById('qual-msg');
-  msgEl.innerHTML = '';
-  try{
-    const res = await runScript('getQualityData', getQualityFilters_());
-    if(!res.success){ msgEl.innerHTML = '<div class="msg err">Failed to load quality data.</div>'; return; }
-
-    if(!qualFilterOptionsLoaded){
-      fillSelect_(document.getElementById('qual-f-email'), res.filterOptions.emails, 'All emails');
-      qualFilterOptionsLoaded = true;
-    }
-
-    document.getElementById('qual-count').textContent = res.taskCount;
-    renderQualityCards_(res.tasks);
-  }catch(e){
-    msgEl.innerHTML = '<div class="msg err">' + escapeHtml(errText(e)) + '</div>';
-  }
-}
-document.getElementById('qual-apply-btn').addEventListener('click', loadQuality);
-document.getElementById('qual-reset-btn').addEventListener('click', ()=>{
-  document.getElementById('qual-f-email').value = '';
-  loadQuality();
-});
-
-function renderQualityCards_(tasks){
-  const holder = document.getElementById('qual-cards');
-  if(!tasks.length){ holder.innerHTML = '<div class="empty">No tasks found.</div>'; return; }
-  holder.innerHTML = tasks.map(t => `
-    <div class="qual-card">
-      <div class="qc-title">📄 ${escapeHtml(t.taskName)}</div>
-      <div class="qc-meta"><span>🆔 Task ID:</span><b>${escapeHtml(t.taskId)}</b></div>
-      <div class="qc-meta"><span>📅 Submitted Date:</span><b>${escapeHtml(t.submittedDate)}</b></div>
-      <div class="qual-metric"><span>Artifacts</span><span class="qm-val">${escapeHtml(t.artifacts)}</span></div>
-      <div class="qual-metric"><span>Attribute</span><span class="qm-val">${escapeHtml(t.attribute)}</span></div>
-      <div class="qual-metric"><span>Total Accuracy</span><span class="qm-val">${escapeHtml(t.totalAccuracy)}</span></div>
-    </div>
-  `).join('');
-}
-
-// ---------------- TEAMS / BATCHES (admin-only) ----------------
-// Each batch = one sheet (tab) in the spreadsheet; the server reads them.
-let teamsPeopleMap = {};     // key -> person
-let teamsBatches = [];       // [{name, people:[...], warning}] oldest -> newest
-let teamsSelectedBatch = null;
-let teamsCurrentKey = null;
-let tmDay = 1;           // 1..3 = Day 1 / Day 2 / Day 3
-let tmComments = ['', '', ''];
-let tmRatings = [0, 0, 0];   // 0 = no rating
-let tmFeedback = '';     // '' | Pass | Failed | Pending | Dropped out
-
-// Same colors as the Attend sheet in Google Sheets
-const ATT_STYLES = {
-  'T1':{bg:'#cfe2f3',fg:'#1155cc'}, 'T2':{bg:'#3d85c6',fg:'#ffffff'}, 'T3':{bg:'#674ea7',fg:'#ffffff'},
-  'P':{bg:'#38761d',fg:'#ffffff'}, 'TP':{bg:'#f1c232',fg:'#3d3400'}, 'T':{bg:'#d9ead3',fg:'#274e13'},
-  'O':{bg:'#45818e',fg:'#ffffff'}, 'E':{bg:'#a64d79',fg:'#ffffff'}, '0':{bg:'#cc0000',fg:'#ffffff'}
+// ---------------------------------------------------------------------
+// JSON API — lets Index.html be hosted ANYWHERE (e.g. GitHub Pages)
+// ---------------------------------------------------------------------
+// When the page is NOT opened from the Apps Script URL, `google.script.run`
+// does not exist, so the page sends POST {fn, args} to this web app instead.
+// Only the functions listed here can be called (anything else is rejected).
+// Admin functions still need the secret admin token (last argument), so this
+// does not open anything that was not already open.
+const API_FUNCTIONS = {
+  getTheme: getTheme, setTheme: setTheme,
+  checkIn: checkIn, lookupPerson: lookupPerson, getAttendanceMonth: getAttendanceMonth,
+  advanceStage: advanceStage, registerTrainee: registerTrainee,
+  adminLogin: adminLogin, isAdminUnlocked: isAdminUnlocked, lockAdmin: lockAdmin,
+  adminFormatAttendSheet: adminFormatAttendSheet, adminSyncAllAttendance: adminSyncAllAttendance,
+  adminSetupDailyTrigger: adminSetupDailyTrigger,
+  adminAddPerson: adminAddPerson, adminGetAllPeople: adminGetAllPeople, adminDeletePerson: adminDeletePerson,
+  adminGetTeams: adminGetTeams, adminSaveComment: adminSaveComment,
+  getDashboardData: getDashboardData, getQualityData: getQualityData
 };
 
-function renderTeamAttendance(p){
-  const vals = Array.isArray(p.attend) ? p.attend : [];
-  const sumEl = document.getElementById('tm-att-summary');
-  const chipsEl = document.getElementById('tm-att-chips');
-  if(!vals.length){
-    sumEl.textContent = 'No attendance yet (not checked in / not in Entries).';
-    chipsEl.innerHTML = '';
-    return;
+function doPost(e) {
+  let out;
+  try {
+    const body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    const name = toStr_(body.fn);
+    if (!Object.prototype.hasOwnProperty.call(API_FUNCTIONS, name)) throw new Error('Unknown function.');
+    const args = Array.isArray(body.args) ? body.args : [];
+    out = { ok: true, result: API_FUNCTIONS[name].apply(null, args) };
+  } catch (err) {
+    out = { ok: false, error: (err && err.message) ? err.message : String(err) };
   }
-  const absent = vals.filter(v => String(v).trim() === '0').length;
-  const present = vals.filter(v => { const t = String(v).trim(); return t !== '' && t !== '0'; }).length;
-  sumEl.innerHTML = '<b>' + present + '</b> present · <b>' + absent + '</b> absent · Day <b>' + vals.length + '</b>';
-  chipsEl.innerHTML = vals.map((v, i) => {
-    const t = String(v).trim();
-    const st = ATT_STYLES[t];
-    const style = st ? 'background:' + st.bg + ';color:' + st.fg + ';border-color:' + st.bg : '';
-    return '<div class="att-chip" style="' + style + '" title="Day ' + (i+1) + '">' + escapeHtml(t || '–') + '<small>D' + (i+1) + '</small></div>';
-  }).join('');
+  return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
 }
 
-function renderTeamStage(p){
-  const nameEl = document.getElementById('tm-stage-name');
-  const subEl = document.getElementById('tm-stage-sub');
-  const barEl = document.getElementById('tm-stage-bar');
-  const idx = stageIndex(p.stage);
-  if(idx === -1){
-    nameEl.textContent = '—';
-    subEl.textContent = 'No stage selected yet';
-    barEl.style.width = '0%';
-    return;
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile('Index')
+    .setTitle('Mickey')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+// ---------------------------------------------------------------------
+// Spreadsheet / sheet plumbing
+// ---------------------------------------------------------------------
+function getSpreadsheet_() {
+  const props = PropertiesService.getScriptProperties();
+  const savedId = props.getProperty(PROP_KEY);
+  if (savedId) {
+    try { return SpreadsheetApp.openById(savedId); } catch (e) { /* fall through */ }
   }
-  const st = STAGES[idx];
-  nameEl.textContent = st.label;
-  subEl.textContent = (PHASE_LABELS[st.phase] || '') + ' · Step ' + (idx+1) + ' of ' + STAGES.length;
-  barEl.style.width = Math.round(((idx+1) / STAGES.length) * 100) + '%';
+  let ss = null;
+  try { ss = SpreadsheetApp.getActiveSpreadsheet(); } catch (e) { ss = null; }
+  if (!ss) ss = SpreadsheetApp.create('Tracker Data');
+  props.setProperty(PROP_KEY, ss.getId());
+  return ss;
 }
 
-function paintStars(){
-  document.querySelectorAll('#tm-stars span').forEach(sp=>{
-    sp.classList.toggle('on', parseInt(sp.getAttribute('data-v'),10) <= tmRatings[tmDay-1]);
-  });
-}
-function paintDayTabs(){
-  document.querySelectorAll('#tm-days .day-tab').forEach(b=>{
-    const d = parseInt(b.getAttribute('data-day'), 10);
-    b.classList.toggle('active', d === tmDay);
-    b.classList.toggle('has', !!(String(tmComments[d-1] || '').trim() || tmRatings[d-1]));
-  });
-  document.getElementById('tm-comment-label').textContent = 'Comment — Day ' + tmDay;
-  document.getElementById('tm-rating-label').textContent = 'Rating — Day ' + tmDay;
-}
-function selectDay(d){
-  tmComments[tmDay-1] = document.getElementById('tm-comment').value; // keep what was typed
-  tmDay = d;
-  document.getElementById('tm-comment').value = tmComments[tmDay-1] || '';
-  paintStars();
-  paintDayTabs();
-}
-document.querySelectorAll('#tm-days .day-tab').forEach(b=>{
-  b.addEventListener('click', ()=> selectDay(parseInt(b.getAttribute('data-day'), 10)));
-});
-document.getElementById('tm-comment').addEventListener('input', (e)=>{
-  tmComments[tmDay-1] = e.target.value;
-  paintDayTabs();
-});
-function paintFeedback(){
-  document.querySelectorAll('#tm-feedback .fb-btn').forEach(b=>{
-    b.classList.toggle('active', b.getAttribute('data-fb') === tmFeedback);
-  });
-}
-document.querySelectorAll('#tm-stars span').forEach(sp=>{
-  sp.addEventListener('click', ()=>{
-    const v = parseInt(sp.getAttribute('data-v'),10);
-    tmRatings[tmDay-1] = (tmRatings[tmDay-1] === v) ? 0 : v; // tap the same star again to clear
-    paintStars();
-    paintDayTabs();
-  });
-});
-document.querySelectorAll('#tm-feedback .fb-btn').forEach(b=>{
-  b.addEventListener('click', ()=>{
-    const v = b.getAttribute('data-fb');
-    tmFeedback = (tmFeedback === v) ? '' : v; // tap again to clear
-    paintFeedback();
-  });
-});
-
-async function loadTeams(silent){
-  const holder = document.getElementById('teams-holder');
-  const msgEl = document.getElementById('teams-msg');
-  msgEl.innerHTML = '';
-  try{
-    const res = await runScript('adminGetTeams');
-    teamsBatches = res.batches || [];
-    teamsPeopleMap = {};
-    teamsBatches.forEach(b => b.people.forEach(p => { teamsPeopleMap[p.key] = p; }));
-    if(!teamsBatches.length){
-      holder.innerHTML = '<div class="empty">No batch sheets found. Add a new sheet (tab) named after the batch, e.g. 8/10.</div>';
-      return;
+function getSheet_() {
+  const ss = getSpreadsheet_();
+  let sheet = ss.getSheetByName(SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET_NAME);
+    sheet.appendRow(HEADERS);
+    sheet.setFrozenRows(1);
+    sheet.getRange('B2:E').setNumberFormat('@'); // nationalId, pc, flash always text
+  } else {
+    const existing = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0];
+    let headerChanged = false;
+    if (existing.length < HEADERS.length) {
+      sheet.getRange(1, existing.length + 1, 1, HEADERS.length - existing.length)
+        .setValues([HEADERS.slice(existing.length)]);
+      headerChanged = true;
     }
-    // keep the current selection if it still exists; otherwise open the newest batch
-    const names = teamsBatches.map(b => b.name);
-    if(!teamsSelectedBatch || names.indexOf(teamsSelectedBatch) === -1){
-      teamsSelectedBatch = teamsBatches[teamsBatches.length-1].name;
+    // Column 13 was called "team"/"batch" in an earlier version: rename it to
+    // "feedback" and blank any leftover batch labels (valid feedback is kept).
+    const h13 = toStr_(existing[COL.feedback - 1]).toLowerCase();
+    if (h13 === 'team' || h13 === 'batch') {
+      sheet.getRange(1, COL.feedback).setValue('feedback');
+      const n = sheet.getLastRow() - 1;
+      if (n > 0) {
+        const rng = sheet.getRange(2, COL.feedback, n, 1);
+        rng.setValues(rng.getValues().map(r => [FEEDBACK_VALUES.indexOf(toStr_(r[0]).trim()) !== -1 ? r[0] : '']));
+      }
+      headerChanged = true;
     }
-    renderTeams();
-  }catch(e){
-    if(silent) return; // background refresh failed: keep the current view
-    holder.innerHTML = '';
-    msgEl.innerHTML = '<div class="msg err">' + escapeHtml(errText(e)) + '</div>';
+    if (headerChanged) { try { ensureDropoutRowRule_(sheet, COL.feedback); } catch (e) {} }
+  }
+  return sheet;
+}
+
+/** Sort key for a batch label like "8/10" (day/month): month*100+day.
+ *  Non-date labels go after dated ones (alphabetical). */
+function batchSortKey_(name) {
+  const m = /^(\d{1,2})\s*[\/\-.]\s*(\d{1,2})/.exec(toStr_(name));
+  return m ? (parseInt(m[2], 10) * 100 + parseInt(m[1], 10)) : null;
+}
+
+function toStr_(v) { return (v === null || v === undefined) ? '' : String(v); }
+
+function todayKey_() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'GMT', 'yyyy-MM-dd');
+}
+function dateKey_(y, m, d) {
+  const dt = new Date(y, m - 1, d);
+  return Utilities.formatDate(dt, Session.getScriptTimeZone() || 'GMT', 'yyyy-MM-dd');
+}
+function startOfDay_(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+
+function parseAttendance_(raw) {
+  try {
+    const obj = JSON.parse(toStr_(raw) || '{}');
+    return (obj && typeof obj === 'object') ? obj : {};
+  } catch (e) { return {}; }
+}
+
+function calcDayNumber_(startedAtIso) {
+  if (!startedAtIso) return null;
+  const start = new Date(startedAtIso);
+  if (isNaN(start.getTime())) return null;
+  const s = startOfDay_(start);
+  const n = startOfDay_(new Date());
+  const msPerDay = 1000 * 60 * 60 * 24;
+  return Math.round((n - s) / msPerDay) + 1;
+}
+
+function findRow_(sheet, nationalId) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+  const data = sheet.getRange(2, 1, lastRow - 1, HEADERS.length).getValues();
+  // Trim BOTH sides before comparing — guards against stray leading/trailing
+  // whitespace on either the stored cell value or the typed-in ID (common
+  // with rows added before text-trimming was enforced everywhere).
+  const target = toStr_(nationalId).trim();
+  for (let i = 0; i < data.length; i++) {
+    if (toStr_(data[i][COL.nationalId - 1]).trim() === target) {
+      return { rowNum: i + 2, row: data[i] };
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------
+// BATCH ROSTER — Name / PC / Yubikey are taken from the batch sheets
+// ---------------------------------------------------------------------
+// The batch sheets (one tab per batch) are the source of truth for each
+// trainee's Name, PC and Yubikey. They are matched to "Entries" by National ID
+// and to the "data base" sheet by Yubikey. If a batch cell is empty, the old
+// value (Entries / data base) is used as a fallback. Built once per execution.
+let _batchRosterCache = null;
+
+/** "ME293329@meti.ai" and "me293329" both become "me293329". */
+function yubikeyKey_(v) { return toStr_(v).trim().toLowerCase().split('@')[0]; }
+
+function getBatchRoster_() {
+  if (_batchRosterCache) return _batchRosterCache;
+  const roster = { byId: {}, byKey: {} };
+  try {
+    const sheets = getSpreadsheet_().getSheets().filter(sh => isBatchSheetName_(sh.getName()));
+    // oldest batch first, so the NEWEST batch wins if someone is in two sheets
+    sheets.sort((a, b) => {
+      const ka = batchSortKey_(a.getName()), kb = batchSortKey_(b.getName());
+      if (ka !== null && kb !== null) return ka - kb;
+      if (ka !== null) return 1;
+      if (kb !== null) return -1;
+      return a.getName().localeCompare(b.getName(), undefined, { numeric: true });
+    });
+    sheets.forEach(sh => {
+      const lastRow = sh.getLastRow(), lastCol = sh.getLastColumn();
+      if (lastRow < 2 || lastCol < 1) return;
+      const values = sh.getRange(1, 1, lastRow, lastCol).getValues();
+      const cols = resolveBatchColumns_(values[0]);
+      const cell = (row, idx) => idx === -1 ? '' : toStr_(row[idx]).trim();
+      for (let i = 1; i < values.length; i++) {
+        const info = {
+          name: cell(values[i], cols.name),
+          pc: cell(values[i], cols.pc),
+          flash: cell(values[i], cols.flash),
+          batch: sh.getName()
+        };
+        const nid = cell(values[i], cols.nationalId);
+        if (nid) roster.byId[nid] = info;
+        const k = yubikeyKey_(info.flash);
+        if (k) roster.byKey[k] = info;
+      }
+    });
+  } catch (e) { /* roster stays empty: everything falls back to Entries / data base */ }
+  _batchRosterCache = roster;
+  return roster;
+}
+
+/** Replaces name / pc / flash of an Entries person with the batch-sheet values. */
+function overlayBatchInfo_(person) {
+  const info = getBatchRoster_().byId[toStr_(person.nationalId).trim()];
+  if (!info) return person;
+  if (info.name) person.name = info.name;
+  if (info.pc) person.pc = info.pc;
+  if (info.flash) person.flash = info.flash;
+  return person;
+}
+
+function rowToPerson_(row) {
+  const person = {
+    id: toStr_(row[COL.id - 1]),
+    nationalId: toStr_(row[COL.nationalId - 1]),
+    name: toStr_(row[COL.name - 1]),
+    pc: toStr_(row[COL.pc - 1]),
+    flash: toStr_(row[COL.flash - 1]),
+    room: toStr_(row[COL.room - 1]),
+    shift: toStr_(row[COL.shift - 1]),
+    stage: normalizeStage_(row[COL.stage - 1]),
+    startedAt: toStr_(row[COL.startedAt - 1]),
+    updatedAt: toStr_(row[COL.updatedAt - 1]),
+    comment: toStr_(row[COL.comment - 1]),
+    feedback: toStr_(row[COL.feedback - 1]),
+    dayNumber: calcDayNumber_(toStr_(row[COL.startedAt - 1]))
+  };
+  return overlayBatchInfo_(person);
+}
+
+// ---------------------------------------------------------------------
+// "Attend" sheet — sequential T1 / T2 / T3 / TP / 0 view
+// ---------------------------------------------------------------------
+// Separate from the calendar view on Page 2. Instead of calendar dates,
+// this shows attendance as a SEQUENCE per trainee:
+//   1st time they ever check in  -> T1
+//   2nd time                     -> T2
+//   3rd time                     -> T3
+//   4th time onward              -> TP
+//   any day that passed with NO check-in (on/after startedAt) -> 0
+// Columns grow automatically (day1, day2, day3, ...) as more days pass.
+
+// Color-coded dropdown values for every day cell in the Attend sheet.
+// Order here also controls the dropdown list order.
+const ATTEND_VALUE_STYLES = [
+  { value: 'T1', bg: '#cfe2f3', text: '#1155cc' }, // light blue
+  { value: 'T2', bg: '#3d85c6', text: '#ffffff' }, // medium blue
+  { value: 'T3', bg: '#674ea7', text: '#ffffff' }, // purple
+  { value: 'P',  bg: '#38761d', text: '#ffffff' }, // green
+  { value: 'TP', bg: '#f1c232', text: '#3d3400' }, // amber/yellow
+  { value: 'T',  bg: '#d9ead3', text: '#274e13' }, // light green
+  { value: 'O',  bg: '#45818e', text: '#ffffff' }, // teal
+  { value: 'E',  bg: '#a64d79', text: '#ffffff' }, // magenta
+  { value: '0',  bg: '#cc0000', text: '#ffffff' }  // red (absent)
+];
+const ATTEND_DROPDOWN_VALUES = ATTEND_VALUE_STYLES.map(s => s.value);
+
+// A trainee with this many CONSECUTIVE absent days ("0") gets their whole row
+// in "Attend" colored red, and "Dropped out" is written as their Feedback in
+// every batch sheet (see applyDropouts_).
+// In the "Attend" sheet the row turns RED after this many "0" in a row (it stays
+// red even if the trainee comes back later).
+const ATTEND_RED_DAYS = 2;
+const DROPOUT_ABSENT_DAYS = 2; // 2 "0" in a row => Feedback "Dropped out" in Entries + every batch sheet
+
+/** 1 -> A, 27 -> AA ... */
+function colLetter_(n) {
+  let s = '';
+  while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+
+/** Colors the WHOLE row red whenever its Feedback cell is "Dropped out" or "Failed".
+ *  Used on "Entries" and on every batch sheet (same look as the Attend sheet).
+ *  Replaces only its own rule, other conditional formats are kept. */
+function ensureDropoutRowRule_(sheet, feedbackCol1) {
+  if (!feedbackCol1) return;
+  const cell = '$' + colLetter_(feedbackCol1) + '2';
+  const formula = '=OR(' + cell + '="Dropped out",' + cell + '="Failed")';
+  const lastCol = Math.max(sheet.getLastColumn(), feedbackCol1);
+  const numRows = Math.max(sheet.getMaxRows() - 1, 1);
+  const range = sheet.getRange(2, 1, numRows, lastCol);
+  const isOurs = r => {
+    const bc = r.getBooleanCondition();
+    if (!bc) return false;
+    const v = bc.getCriteriaValues();
+    return !!(v && v.length && /^=(\$[A-Z]+2="Dropped out"|OR\(\$[A-Z]+2="Dropped out",\$[A-Z]+2="Failed"\))$/.test(toStr_(v[0])));
+  };
+  const kept = sheet.getConditionalFormatRules().filter(r => !isOurs(r));
+  const rule = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied(formula)
+    .setBackground('#e06666')
+    .setFontColor('#ffffff')
+    .setBold(true)
+    .setRanges([range])
+    .build();
+  sheet.setConditionalFormatRules([rule].concat(kept));
+}
+
+/** Makes sure the red "Dropped out" row rule exists on Entries and on every
+ *  batch sheet that has a Feedback column. */
+function applyDropoutFormatting_() {
+  try { ensureDropoutRowRule_(getSheet_(), COL.feedback); } catch (e) {}
+  getSpreadsheet_().getSheets().forEach(sh => {
+    if (!isBatchSheetName_(sh.getName())) return;
+    try {
+      const lastCol = sh.getLastColumn();
+      if (lastCol < 1) return;
+      const cols = resolveBatchColumns_(sh.getRange(1, 1, 1, lastCol).getValues()[0]);
+      if (cols.feedback !== -1) ensureDropoutRowRule_(sh, cols.feedback + 1);
+    } catch (e) { /* non-fatal */ }
+  });
+}
+
+/** True if the day values contain DROPOUT_ABSENT_DAYS "0" in a row. */
+function hasConsecutiveAbsence_(values) {
+  let run = 0;
+  for (let i = 0; i < values.length; i++) {
+    run = (toStr_(values[i]) === '0') ? run + 1 : 0;
+    if (run >= DROPOUT_ABSENT_DAYS) return true;
+  }
+  return false;
+}
+
+/** Applies the dropdown (data validation) + color-coded conditional
+ *  formatting to a range of day-columns. Covers a generous number of rows
+ *  (500) so newly added rows are covered automatically without needing to
+ *  re-run this. Safe to call repeatedly — it fully replaces the sheet's
+ *  conditional format rules each time.
+ *  `startCol` is the 1-based column where day1 begins (defaults to 3). */
+function applyAttendFormatting_(sheet, dayColCount, startCol) {
+  startCol = startCol || 3;
+  if (dayColCount <= 0) return;
+  const numRows = Math.max(sheet.getMaxRows() - 1, 500);
+  const range = sheet.getRange(2, startCol, numRows, dayColCount);
+
+  const validationRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(ATTEND_DROPDOWN_VALUES, true)
+    .setAllowInvalid(true)
+    .build();
+  range.setDataValidation(validationRule);
+
+  const colorRules = ATTEND_VALUE_STYLES.map(style =>
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo(style.value)
+      .setBackground(style.bg)
+      .setFontColor(style.text)
+      .setBold(true)
+      .setRanges([range])
+      .build()
+  );
+  // Whole-row red rule (FIRST = highest priority). Red when the row has
+  // DROPOUT_ABSENT_DAYS consecutive "0" (it STAYS red even if the trainee comes
+  // back on a later day) OR the trainee's Feedback in Entries is Failed /
+  // Dropped out. Live formula, so manual edits are respected immediately.
+  const lastLetter = colLetter_(startCol - 1 + dayColCount);
+  const pattern = '\\|' + '0\\|'.repeat(ATTEND_RED_DAYS);
+  const twoAbsent = 'REGEXMATCH("|"&TEXTJOIN("|",FALSE,$' + colLetter_(startCol) + '2:$' + lastLetter + '2)&"|","' + pattern + '")';
+  const entIdRange = 'Entries!$' + colLetter_(COL.nationalId) + '$2:$' + colLetter_(COL.nationalId);
+  const entFbRange = 'Entries!$' + colLetter_(COL.feedback) + '$2:$' + colLetter_(COL.feedback);
+  const badFeedback = 'REGEXMATCH(IFERROR(INDEX(INDIRECT("' + entFbRange + '"),MATCH($A2&"",INDIRECT("' + entIdRange + '"),0)),""),"^(Dropped out|Failed)$")';
+  const rowFormula = '=OR(' + twoAbsent + ',' + badFeedback + ')';
+  const rowRange = sheet.getRange(2, 1, numRows, startCol - 1 + dayColCount);
+  const rowRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied(rowFormula)
+    .setBackground('#e06666')
+    .setFontColor('#ffffff')
+    .setBold(true)
+    .setRanges([rowRange])
+    .build();
+
+  sheet.setConditionalFormatRules([rowRule].concat(colorRules));
+}
+
+/** Admin-callable: (re)applies the dropdown + color formatting to every
+ *  existing day column in the Attend sheet. Useful right after deploying
+ *  this feature, to colorize data that's already there. */
+function adminFormatAttendSheet(token) {
+  if (!isAdminUnlocked_(token)) throw new Error('Not authorized.');
+  const sheet = getAttendSheet_();
+  const dayColCount = Math.max(sheet.getLastColumn() - 2, 0);
+  applyAttendFormatting_(sheet, dayColCount);
+  return { success: true, dayColCount: dayColCount };
+}
+
+function getAttendSheet_() {
+  const ss = getSpreadsheet_();
+  let sheet = ss.getSheetByName(ATTEND_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(ATTEND_SHEET_NAME);
+    sheet.appendRow(['nationalId', 'name', 'day1', 'day2', 'day3', 'day4', 'day5']);
+    sheet.setFrozenRows(1);
+    sheet.getRange('A2:A').setNumberFormat('@');
+    applyAttendFormatting_(sheet, 5);
+  }
+  return sheet;
+}
+
+function findAttendRow_(sheet, nationalId) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+  const ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  for (let i = 0; i < ids.length; i++) {
+    if (toStr_(ids[i][0]) === toStr_(nationalId)) return i + 2;
+  }
+  return null;
+}
+
+/** Makes sure the Attend sheet has at least `neededCount` day-columns
+ *  (day1, day2, ...), adding more headers if needed. Columns C onward.
+ *  Also (re)applies the dropdown + color formatting to cover the new
+ *  columns. */
+function ensureAttendDayColumns_(sheet, neededCount) {
+  const currentCount = Math.max(sheet.getLastColumn() - 2, 0);
+  if (neededCount > currentCount) {
+    const newHeaders = [];
+    for (let i = currentCount + 1; i <= neededCount; i++) newHeaders.push('day' + i);
+    sheet.getRange(1, 3 + currentCount, 1, newHeaders.length).setValues([newHeaders]);
+    applyAttendFormatting_(sheet, neededCount);
   }
 }
 
-// "!" badge: rating of 3 or less (1-3), or the trainee has a comment.
-function attentionReasons(p){
+/** Syncs one trainee's row in the "Attend" sheet up through today —
+ *  WITHOUT ever overwriting a cell that already has a value.
+ *
+ *  The "Attend" sheet is the authoritative record of attendance from here
+ *  on: this function only ever WRITES to a cell if it's currently blank.
+ *  That means:
+ *   - A staff member can open the sheet and manually type/select any value
+ *     into any day cell (P, O, E, T1, custom notes, whatever) and it will
+ *     never be silently overwritten by the app.
+ *   - Past days that are still blank (nobody checked in, and nobody
+ *     manually filled them in) get backfilled with "0" (absent).
+ *   - Today's cell only gets auto-filled with the next T1/T2/T3/TP label
+ *     if it's still blank — i.e. the FIRST check-in of the day writes it;
+ *     every check-in after that (or a staff override) is left untouched. */
+function updateAttendSheetForPerson_(nationalId) {
+  const entriesSheet = getSheet_();
+  const found = findRow_(entriesSheet, nationalId);
+  if (!found) return;
+
+  const person = rowToPerson_(found.row);
+  if (!person.startedAt) return; // hasn't checked in even once yet — nothing to show
+
+  const start = startOfDay_(new Date(person.startedAt));
+  const today = startOfDay_(new Date());
+  const msPerDay = 1000 * 60 * 60 * 24;
+  const todayDayNum = Math.round((today - start) / msPerDay) + 1; // 1-based, inclusive of today
+  if (todayDayNum < 1) return;
+
+  const attendSheet = getAttendSheet_();
+  ensureAttendDayColumns_(attendSheet, todayDayNum);
+
+  let rowNum = findAttendRow_(attendSheet, nationalId);
+  if (!rowNum) {
+    attendSheet.appendRow([nationalId, person.name]);
+    rowNum = attendSheet.getLastRow();
+  } else {
+    attendSheet.getRange(rowNum, 2).setValue(person.name); // keep the name label in sync
+  }
+
+  // Read whatever is already in the sheet first — this is the ground truth.
+  const existing = attendSheet.getRange(rowNum, 3, 1, todayDayNum).getValues()[0].map(v => toStr_(v));
+
+  // Backfill blank PAST days as absent ("0"). Never touches a cell that
+  // already has anything in it (auto or manual).
+  for (let i = 0; i < todayDayNum - 1; i++) {
+    if (!existing[i]) existing[i] = '0';
+  }
+
+  // Only auto-fill TODAY's cell if it's still blank.
+  if (!existing[todayDayNum - 1]) {
+    const presentCount = existing.slice(0, todayDayNum - 1).filter(v => v && v !== '0').length + 1;
+    existing[todayDayNum - 1] = presentCount <= 3 ? ('T' + presentCount) : 'TP';
+  }
+
+  attendSheet.getRange(rowNum, 3, 1, todayDayNum).setValues([existing]);
+  return hasConsecutiveAbsence_(existing);
+}
+
+/** Returns the raw day-value array (day1, day2, ...) for one trainee as
+ *  currently stored in the "Attend" sheet — the authoritative source. */
+function getAttendDayValues_(nationalId) {
+  const sheet = getAttendSheet_();
+  const rowNum = findAttendRow_(sheet, nationalId);
+  if (!rowNum) return [];
+  const dayColCount = Math.max(sheet.getLastColumn() - 2, 0);
+  if (dayColCount <= 0) return [];
+  return sheet.getRange(rowNum, 3, 1, dayColCount).getValues()[0].map(v => toStr_(v));
+}
+
+/** Recomputes the Attend sheet for EVERY trainee that has started tracking.
+ *  Safe to run manually, from the admin button, or on a daily time-driven
+ *  trigger (Extensions > Apps Script > Triggers > add trigger for this
+ *  function) so days with no check-in still get marked "0" even if the
+ *  trainee never opens the app again that day. */
+function syncAllAttendanceNow() {
+  const sheet = getSheet_();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { success: true, count: 0, dropped: 0 };
+  const data = sheet.getRange(2, 1, lastRow - 1, HEADERS.length).getValues();
+  let count = 0;
+  const droppedIds = {};
+  data.forEach(row => {
+    const nid = toStr_(row[COL.nationalId - 1]);
+    if (nid) {
+      if (updateAttendSheetForPerson_(nid)) droppedIds[nid.trim()] = true;
+      count++;
+    }
+  });
+  // Make sure the red-row rule is in place, then mark dropouts in every batch sheet.
+  try {
+    const aSheet = getAttendSheet_();
+    applyAttendFormatting_(aSheet, Math.max(aSheet.getLastColumn() - 2, 0));
+  } catch (e) { /* non-fatal */ }
+  const dropped = applyDropouts_(droppedIds);
+  applyDropoutFormatting_();
+  return { success: true, count: count, dropped: dropped };
+}
+
+/** Writes Feedback = "Dropped out" into "Entries" and EVERY batch sheet for the given
+ *  National IDs (matched by the sheet's National ID column). Only rows whose
+ *  Feedback is empty or "Pending" are changed, so a result you set by hand
+ *  (Pass / Failed / Dropped out) is never overwritten. Returns rows changed. */
+function applyDropouts_(idSet) {
+  if (!Object.keys(idSet).length) return 0;
+  let changed = 0;
+
+  // Entries: same rule (feedback empty or Pending -> Dropped out)
+  const eSheet = getSheet_();
+  Object.keys(idSet).forEach(nid => {
+    const found = findRow_(eSheet, nid);
+    if (!found) return;
+    const cur = toStr_(found.row[COL.feedback - 1]).trim().toLowerCase();
+    if (cur === '' || cur === 'pending') {
+      eSheet.getRange(found.rowNum, COL.feedback).setValue('Dropped out');
+      changed++;
+    }
+  });
+
+  getSpreadsheet_().getSheets().forEach(sh => {
+    if (!isBatchSheetName_(sh.getName())) return;
+    const lastRow = sh.getLastRow(), lastCol = sh.getLastColumn();
+    if (lastRow < 2 || lastCol < 1) return;
+    const values = sh.getRange(1, 1, lastRow, lastCol).getValues();
+    const cols = resolveBatchColumns_(values[0]);
+    if (cols.nationalId === -1) return;
+    let fbCol = cols.feedback + 1; // 1-based
+    for (let i = 1; i < values.length; i++) {
+      const nid = toStr_(values[i][cols.nationalId]).trim();
+      if (!nid || !idSet[nid]) continue;
+      const cur = cols.feedback === -1 ? '' : toStr_(values[i][cols.feedback]).trim().toLowerCase();
+      if (cur !== '' && cur !== 'pending') continue;
+      if (fbCol === 0) { // create the Feedback column once
+        fbCol = lastCol + 1;
+        sh.getRange(1, fbCol).setValue('Feedback');
+      }
+      sh.getRange(i + 1, fbCol).setValue('Dropped out');
+      changed++;
+    }
+  });
+  return changed;
+}
+
+/** Installs two triggers (never duplicates them):
+ *  1) a daily one (about 00:30) that runs syncAllAttendanceNow, so everyone who
+ *     did not come gets a "0" for the day that just ended;
+ *  2) an on-edit one on the "Attend" sheet: the moment a row reaches
+ *     DROPOUT_ABSENT_DAYS "0" in a row (typed by hand or automatic), "Dropped out"
+ *     is written to Entries + the batch sheets and the rows turn red, without
+ *     waiting for the next sync. */
+function setupDailyAttendanceTrigger() {
+  const triggers = ScriptApp.getProjectTriggers();
+  const has = fn => triggers.some(t => t.getHandlerFunction() === fn);
+  let created = false;
+  if (!has('syncAllAttendanceNow')) {
+    ScriptApp.newTrigger('syncAllAttendanceNow').timeBased().everyDays(1).atHour(0).nearMinute(30).create();
+    created = true;
+  }
+  if (!has('onAttendEdit')) {
+    ScriptApp.newTrigger('onAttendEdit').forSpreadsheet(getSpreadsheet_()).onEdit().create();
+    created = true;
+  }
+  return { success: true, already: !created };
+}
+
+/** Installable on-edit handler (see setupDailyAttendanceTrigger). */
+function onAttendEdit(e) {
+  try {
+    const range = e && e.range;
+    if (!range) return;
+    const sh = range.getSheet();
+    if (sh.getName() !== ATTEND_SHEET_NAME) return;
+    if (range.getLastColumn() < 3) return;
+    const first = Math.max(range.getRow(), 2);
+    const last = Math.min(range.getLastRow(), first + 49); // at most 50 rows per edit
+    if (last < first) return;
+    const lastCol = sh.getLastColumn();
+    const rows = sh.getRange(first, 1, last - first + 1, lastCol).getValues();
+    const ids = {};
+    rows.forEach(vals => {
+      const nid = toStr_(vals[0]).trim();
+      if (nid && hasConsecutiveAbsence_(vals.slice(2).map(v => toStr_(v)))) ids[nid] = true;
+    });
+    if (Object.keys(ids).length) {
+      applyDropouts_(ids);
+      applyDropoutFormatting_();
+    }
+  } catch (err) { /* never break editing the sheet */ }
+}
+function adminSetupDailyTrigger(token) {
+  if (!isAdminUnlocked_(token)) throw new Error('Not authorized.');
+  return setupDailyAttendanceTrigger();
+}
+
+/** Admin-gated wrapper so the frontend "Sync Attendance Sheet" button can
+ *  call this safely. */
+function adminSyncAllAttendance(token) {
+  if (!isAdminUnlocked_(token)) throw new Error('Not authorized.');
+  return syncAllAttendanceNow();
+}
+
+// ---------------------------------------------------------------------
+// PAGE 1 — Check in
+// ---------------------------------------------------------------------
+
+// ---------------------------------------------------------------------
+// REGISTER (public) — new trainees sign themselves up into the "log" sheet
+// ---------------------------------------------------------------------
+// Columns: timestamp | nationalId | name | phone | gmail | shift | location
+const LOG_HEADERS = ['timestamp', 'nationalId', 'name', 'phone', 'gmail', 'shift', 'location'];
+const REGISTER_SHIFTS = ['ON', 'N', 'M'];
+const REGISTER_LOCATIONS = ['NC', 'SF'];
+
+function getLogSheet_() {
+  const ss = getSpreadsheet_();
+  let sheet = ss.getSheetByName(LOG_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(LOG_SHEET_NAME);
+    sheet.appendRow(LOG_HEADERS);
+    sheet.setFrozenRows(1);
+    sheet.getRange('B2:G').setNumberFormat('@'); // ID / phone keep leading zeros, nothing becomes a formula
+  }
+  return sheet;
+}
+
+function isInLog_(nationalId) {
+  const target = toStr_(nationalId).trim();
+  if (!target) return false;
+  const sheet = getLogSheet_();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return false;
+  const ids = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
+  for (let i = 0; i < ids.length; i++) {
+    if (toStr_(ids[i][0]).trim() === target) return true;
+  }
+  return false;
+}
+
+/** Message shown when a National ID is not in "Entries": if the person already
+ *  signed up in "log" they are told to wait for the admin. */
+function notRegisteredMessage_(nationalId) {
+  try {
+    if (isInLog_(nationalId)) return 'Your registration was received. The admin will activate your account soon.';
+  } catch (e) { /* fall through */ }
+  return 'National ID not registered. Please register first or contact the admin.';
+}
+
+/** Public: saves one sign-up row into the "log" sheet. */
+function registerTrainee(entry) {
+  entry = entry || {};
+  const nid = toStr_(entry.nationalId).replace(/\s/g, '');
+  const name = toStr_(entry.name).trim().replace(/\s+/g, ' ');
+  const phone = toStr_(entry.phone).replace(/[\s-]/g, '');
+  const gmail = toStr_(entry.gmail).trim().toLowerCase();
+  const shift = toStr_(entry.shift).trim().toUpperCase();
+  const location = toStr_(entry.location).trim().toUpperCase();
+
+  if (!/^\d{14}$/.test(nid)) return { success: false, message: 'National ID must be 14 digits.' };
+  if (name.length < 3 || name.length > 100) return { success: false, message: 'Please enter your full name.' };
+  if (!/^\+?\d{10,15}$/.test(phone)) return { success: false, message: 'Please enter a valid phone number.' };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(gmail) || gmail.length > 100) return { success: false, message: 'Please enter a valid Gmail address.' };
+  if (REGISTER_SHIFTS.indexOf(shift) === -1) return { success: false, message: 'Please choose a shift.' };
+  if (REGISTER_LOCATIONS.indexOf(location) === -1) return { success: false, message: 'Please choose a location.' };
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    if (findRow_(getSheet_(), nid)) {
+      return { success: false, message: 'You are already registered. Please use Check In.' };
+    }
+    if (isInLog_(nid)) {
+      return { success: false, message: 'This National ID has already registered. The admin will activate it soon.' };
+    }
+    getLogSheet_().appendRow([new Date(), nid, name, phone, gmail, shift, location]);
+  } finally {
+    lock.releaseLock();
+  }
+  return { success: true };
+}
+
+/** Looks up a National ID without marking attendance. Used to validate
+ *  before showing the Start Tracker button, and by pages 2/3 to preload. */
+function lookupPerson(nationalId) {
+  const sheet = getSheet_();
+  const found = findRow_(sheet, nationalId);
+  if (!found) return { success: false, message: notRegisteredMessage_(nationalId) };
+  return { success: true, person: rowToPerson_(found.row) };
+}
+
+/** The "Start Tracker" action: marks today present, stamps startedAt on
+ *  first-ever check-in, and returns the trainee's info for the card. */
+function checkIn(nationalId) {
+  // If the typed value is an admin USER NAME, ask the client for the password
+  // instead of checking in (nobody is marked present for this).
+  if (findUser_(nationalId)) return { success: true, needPassword: true };
+  const sheet = getSheet_();
+  const found = findRow_(sheet, nationalId);
+  if (!found) return { success: false, message: notRegisteredMessage_(nationalId) };
+
+  const rowNum = found.rowNum;
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const today = todayKey_();
+
+  const attendance = parseAttendance_(found.row[COL.attendance - 1]);
+  attendance[today] = 'present';
+
+  let startedAt = toStr_(found.row[COL.startedAt - 1]);
+  if (!startedAt) startedAt = nowIso;
+
+  sheet.getRange(rowNum, COL.attendance).setValue(JSON.stringify(attendance));
+  sheet.getRange(rowNum, COL.startedAt).setValue(startedAt);
+  sheet.getRange(rowNum, COL.updatedAt).setValue(nowIso);
+
+  const updatedRow = sheet.getRange(rowNum, 1, 1, HEADERS.length).getValues()[0];
+
+  // The "Attend" sheet is the authoritative record from here on — this
+  // writes today's cell there (non-destructively; see the function for
+  // details). The JSON above is kept only as a lightweight internal log.
+  try { updateAttendSheetForPerson_(nationalId); } catch (e) { /* non-fatal */ }
+
+  return { success: true, person: rowToPerson_(updatedRow), alreadyCheckedInToday: false };
+}
+
+// ---------------------------------------------------------------------
+// PAGE 2 — Attendance calendar
+// ---------------------------------------------------------------------
+
+/** Returns a full month's attendance grid for one National ID.
+ *  month is 1-12. Each day gets a status:
+ *   'present'  — they checked in that day
+ *   'absent'   — a past day (on/after startedAt) with no check-in
+ *   'today'    — today, not checked in yet (still open)
+ *   'future'   — a day that hasn't happened yet
+ *   'inactive' — before their startedAt (not tracked yet) */
+function getAttendanceMonth(nationalId, year, month) {
+  const sheet = getSheet_();
+  const found = findRow_(sheet, nationalId);
+  if (!found) return { success: false, message: 'National ID not registered.' };
+
+  const person = rowToPerson_(found.row);
+
+  // Self-heal first: backfill any blank past days as absent ("0") so the
+  // Attend sheet is fully caught up through today. This NEVER overwrites
+  // a cell that already has something in it (auto or manually entered by
+  // staff) — see updateAttendSheetForPerson_ for the non-destructive logic.
+  try { updateAttendSheetForPerson_(nationalId); } catch (e) { /* non-fatal */ }
+
+  // The "Attend" sheet is now the authoritative source — read straight
+  // from it instead of the legacy JSON attendance blob.
+  const dayValues = getAttendDayValues_(nationalId); // index 0 = day1 = startedAt date
+
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const today = startOfDay_(new Date());
+  const startedAtDate = person.startedAt ? startOfDay_(new Date(person.startedAt)) : null;
+  const msPerDay = 1000 * 60 * 60 * 24;
+
+  const days = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateObj = new Date(year, month - 1, d);
+    let status;
+    if (!startedAtDate) {
+      status = 'inactive';
+    } else if (dateObj.getTime() > today.getTime()) {
+      status = 'future';
+    } else if (dateObj.getTime() < startedAtDate.getTime()) {
+      status = 'inactive';
+    } else {
+      const dayIndex = Math.round((dateObj.getTime() - startedAtDate.getTime()) / msPerDay); // 0-based
+      const val = dayValues[dayIndex] || '';
+      if (dateObj.getTime() === today.getTime() && !val) {
+        status = 'today';
+      } else if (val && val !== '0') {
+        status = 'present';
+      } else {
+        status = 'absent';
+      }
+    }
+    days.push({ day: d, status: status });
+  }
+
+  return { success: true, person: person, daysInMonth: daysInMonth, days: days };
+}
+
+// ---------------------------------------------------------------------
+// PAGE 3 — Stage picker (free navigation — forward or backward)
+// ---------------------------------------------------------------------
+
+/** Sets a trainee's current stage to any stage in STAGE_ORDER — forward
+ *  to advance, or backward to revisit/revert to an earlier one. The only
+ *  thing rejected is a completely unknown stage id. */
+function advanceStage(nationalId, stageId) {
+  const sheet = getSheet_();
+  const found = findRow_(sheet, nationalId);
+  if (!found) return { success: false, message: 'National ID not registered.' };
+
+  const targetIdx = STAGE_ORDER.indexOf(toStr_(stageId));
+  if (targetIdx === -1) return { success: false, message: 'Unknown stage.' };
+
+  const nowIso = new Date().toISOString();
+  sheet.getRange(found.rowNum, COL.stage).setValue(toStr_(stageId));
+  sheet.getRange(found.rowNum, COL.updatedAt).setValue(nowIso);
+
+  return { success: true, stage: toStr_(stageId), updatedAt: nowIso };
+}
+
+// ---------------------------------------------------------------------
+// ADMIN (password gated)
+// ---------------------------------------------------------------------
+// ---- "users" sheet ----
+function getUsersSheet_() {
+  const ss = getSpreadsheet_();
+  let sheet = ss.getSheetByName(USERS_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(USERS_SHEET_NAME);
+    sheet.appendRow(['user', 'password']);
+    sheet.setFrozenRows(1);
+    sheet.getRange('A2:B').setNumberFormat('@'); // keep user / password as text
+  }
+  return sheet;
+}
+
+/** Returns [{ user, password }] from the "users" sheet (headers: user, password). */
+function readUsers_() {
+  const sheet = getUsersSheet_();
+  const lastRow = sheet.getLastRow(), lastCol = sheet.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return [];
+  const values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  const norm = values[0].map(normHeader_);
+  let uCol = ['user', 'username', 'name'].map(n => norm.indexOf(n)).filter(i => i !== -1)[0];
+  let pCol = ['password', 'pass', 'pw'].map(n => norm.indexOf(n)).filter(i => i !== -1)[0];
+  if (uCol === undefined) uCol = 0;
+  if (pCol === undefined) pCol = 1;
   const out = [];
-  const ratings = Array.isArray(p.ratings) ? p.ratings : [];
-  const comments = Array.isArray(p.comments) ? p.comments : [];
-  for(let i = 0; i < 3; i++){
-    const r = parseInt(ratings[i], 10);
-    if(r >= 1 && r <= 3) out.push('Day ' + (i+1) + ' rating ' + r);
-  }
-  for(let i = 0; i < 3; i++){
-    if(String(comments[i] || '').trim() !== '') out.push('Day ' + (i+1) + ' comment');
+  for (let i = 1; i < values.length; i++) {
+    const user = toStr_(values[i][uCol]).trim();
+    if (user) out.push({ user: user, password: toStr_(values[i][pCol]) });
   }
   return out;
 }
-// Don't print "Batch BATCH. 11 October" when the sheet name already says batch.
-function batchLabel(name){ return /^batch/i.test(name || '') ? name : 'Batch ' + name; }
 
-function renderTeams(){
-  const holder = document.getElementById('teams-holder');
-  const chips = teamsBatches.map(b => `
-    <button class="batch-chip ${b.name===teamsSelectedBatch?'active':''}" data-batch="${escapeHtml(b.name)}">
-      ${escapeHtml(batchLabel(b.name))}<span class="cnt">${b.people.length}</span>
-    </button>`).join('');
-
-  const batch = teamsBatches.find(b => b.name === teamsSelectedBatch);
-  const people = batch ? batch.people : [];
-  const presentCount = people.filter(p => p.todayStatus === 'present').length;
-  const attentionCount = people.filter(p => attentionReasons(p).length).length;
-  const tiles = people.map(p => `
-    <div class="team-pc ${p.todayStatus}" data-key="${escapeHtml(p.key)}">
-      ${escapeHtml(p.pc || '—')}
-      ${attentionReasons(p).length ? '<span class="warn" title="' + escapeHtml(attentionReasons(p).join(' · ')) + '">!</span>' : ''}
-    </div>`).join('');
-  const warning = (batch && batch.warning) ? `<div class="msg err">${escapeHtml(batch.warning)}</div>` : '';
-  const body = people.length
-    ? `<div class="team-grid">${tiles}</div>`
-    : (batch && batch.warning ? '' : '<div class="empty">No trainees in this sheet yet.</div>');
-
-  holder.innerHTML = `
-    <div class="batch-bar">${chips}</div>
-    <div class="panel">
-      <h2>${escapeHtml(batchLabel(teamsSelectedBatch))} — PCs</h2>
-      <div class="batch-summary"><b>${people.length}</b> trainees · <b>${presentCount}</b> present · <b>${attentionCount}</b> need attention</div>
-      ${warning}
-      ${body}
-      <div class="team-legend">
-        <span><span class="dotleg" style="background:var(--ok)"></span> Present</span>
-        <span><span class="dotleg" style="background:var(--danger)"></span> Absent</span>
-        <span><span class="dotleg" style="background:var(--amber)"></span> ! Rating 3 or less, or has a comment</span>
-      </div>
-    </div>`;
-
-  holder.querySelectorAll('.batch-chip').forEach(ch=>{
-    ch.addEventListener('click', ()=>{ teamsSelectedBatch = ch.getAttribute('data-batch'); renderTeams(); });
-  });
-  holder.querySelectorAll('.team-pc').forEach(el=>{
-    el.addEventListener('click', ()=> openTeamModal(el.getAttribute('data-key')));
-  });
-}
-
-function openTeamModal(key){
-  const p = teamsPeopleMap[key];
-  if(!p) return;
-  teamsCurrentKey = key;
-  document.getElementById('tm-pc').textContent = 'PC ' + (p.pc || '—');
-  const st = document.getElementById('tm-status');
-  st.textContent = p.todayStatus === 'present' ? 'Present today' : 'Absent today';
-  st.className = 'tm-status ' + p.todayStatus;
-  document.getElementById('tm-flash').textContent = p.flash || '—';
-  document.getElementById('tm-name').textContent = p.name || '—';
-  tmDay = 1;
-  tmComments = [0, 1, 2].map(i => (p.comments && p.comments[i]) || '');
-  tmRatings = [0, 1, 2].map(i => parseInt(p.ratings && p.ratings[i], 10) || 0);
-  document.getElementById('tm-comment').value = tmComments[0];
-  tmFeedback = p.feedback || '';
-  paintStars(); paintFeedback(); paintDayTabs();
-  renderTeamAttendance(p);
-  renderTeamStage(p);
-  document.getElementById('tm-msg').innerHTML = '';
-  document.getElementById('team-modal').classList.add('open');
-}
-function closeTeamModal(){ document.getElementById('team-modal').classList.remove('open'); }
-
-document.getElementById('tm-close').addEventListener('click', closeTeamModal);
-document.getElementById('team-modal').addEventListener('click', (e)=>{ if(e.target.id === 'team-modal') closeTeamModal(); });
-
-document.getElementById('tm-save').addEventListener('click', async ()=>{
-  const p = teamsPeopleMap[teamsCurrentKey];
-  if(!p) return;
-  const btn = document.getElementById('tm-save');
-  const msgEl = document.getElementById('tm-msg');
-  tmComments[tmDay-1] = document.getElementById('tm-comment').value; // current day's text
-  const ratingsOut = tmRatings.map(v => v ? String(v) : '');
-  btn.disabled = true; btn.textContent = 'Saving…';
-  msgEl.innerHTML = '';
-  try{
-    await runScript('adminSaveComment', p.batch, p.rowNum, tmComments, ratingsOut, tmFeedback);
-    p.comments = tmComments.slice(); p.ratings = ratingsOut; p.feedback = tmFeedback;
-    renderTeams(); // update the ! badge on the tiles
-    msgEl.innerHTML = '<div class="msg ok">Saved ✓</div>';
-  }catch(e){
-    msgEl.innerHTML = '<div class="msg err">' + escapeHtml(errText(e)) + '</div>';
+function findUser_(username) {
+  const u = toStr_(username).trim().toLowerCase();
+  if (!u) return null;
+  const list = readUsers_();
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].user.toLowerCase() === u) return list[i];
   }
-  btn.disabled = false; btn.textContent = 'Save';
+  return null;
+}
+
+// ---- tokens ----
+function getAdminTokens_() {
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty(ADMIN_TOKENS_KEY);
+    const arr = JSON.parse(raw || '[]');
+    return Array.isArray(arr) ? arr.filter(x => x && typeof x === 'object' && x.t) : [];
+  } catch (e) { return []; }
+}
+
+/** Creates a secret token for this user (kept server-side, last 20 only). */
+function issueAdminToken_(username) {
+  const token = Utilities.getUuid() + Utilities.getUuid();
+  const tokens = getAdminTokens_();
+  tokens.push({ t: token, u: toStr_(username) });
+  PropertiesService.getScriptProperties().setProperty(ADMIN_TOKENS_KEY, JSON.stringify(tokens.slice(-20)));
+  return token;
+}
+
+/** True only if the token was issued by the server AND its user still exists
+ *  in the "users" sheet (delete the row = access revoked immediately). */
+function isAdminUnlocked_(token) {
+  const t = toStr_(token);
+  if (!t) return false;
+  const entry = getAdminTokens_().filter(x => x.t === t)[0];
+  if (!entry) return false;
+  if (entry.u === '__test__') return true; // used only by testSetup()
+  return findUser_(entry.u) !== null;
+}
+function isAdminUnlocked(token) { return isAdminUnlocked_(token); }
+
+/** Admin login: username + password from the "users" sheet. Returns a token.
+ *  Locks a username for 10 minutes after 5 wrong attempts. */
+function adminLogin(username, password) {
+  const u = toStr_(username).trim();
+  const cache = CacheService.getScriptCache();
+  const key = 'loginfail_' + u.toLowerCase().slice(0, 100);
+  const fails = parseInt(cache.get(key) || '0', 10);
+  if (fails >= 5) return { success: false, message: 'Too many attempts. Try again in 10 minutes.' };
+
+  const user = findUser_(u);
+  if (!user || user.password === '' || toStr_(password) !== user.password) {
+    cache.put(key, String(fails + 1), 600);
+    return { success: false, message: 'Wrong user or password.' };
+  }
+  cache.remove(key);
+  return { success: true, token: issueAdminToken_(user.user) };
+}
+
+/** Logs this device out (invalidates its token). */
+function lockAdmin(token) {
+  try {
+    const t = toStr_(token);
+    const tokens = getAdminTokens_().filter(x => x.t !== t);
+    PropertiesService.getScriptProperties().setProperty(ADMIN_TOKENS_KEY, JSON.stringify(tokens));
+  } catch (e) {}
+  return true;
+}
+
+/** Emergency: run from the Apps Script editor to log out EVERY admin device. */
+function revokeAllAdminTokens() {
+  PropertiesService.getScriptProperties().deleteProperty(ADMIN_TOKENS_KEY);
+  Logger.log('All admin tokens revoked.');
+}
+
+/** Pre-registers a trainee. National ID must be unique. startedAt is left
+ *  blank on purpose — it only gets stamped the moment they FIRST tap
+ *  "Start Tracker" themselves, so Day-count reflects their real start. */
+function adminAddPerson(entry, token) {
+  if (!isAdminUnlocked_(token)) throw new Error('Not authorized.');
+  const sheet = getSheet_();
+  const nationalId = toStr_(entry.nationalId).trim();
+  if (!nationalId) throw new Error('National ID is required.');
+
+  if (findRow_(sheet, nationalId)) throw new Error('This National ID is already registered.');
+
+  const id = 'p_' + new Date().getTime() + '_' + Math.random().toString(36).slice(2, 7);
+  const nowIso = new Date().toISOString();
+  const row = [
+    id, nationalId, toStr_(entry.name), toStr_(entry.pc), toStr_(entry.flash),
+    toStr_(entry.room), toStr_(entry.shift), toStr_(entry.stage) || STAGE_ORDER[0],
+    '', nowIso, '{}', ''
+  ];
+  sheet.appendRow(row);
+  return { success: true };
+}
+
+/** Full list for the admin panel, with computed day number + today's
+ *  attendance status for a quick overview. Reads today's status from the
+ *  "Attend" sheet (the authoritative record), so manual staff edits show
+ *  up here too. */
+function adminGetAllPeople(token) {
+  if (!isAdminUnlocked_(token)) throw new Error('Not authorized.');
+  const sheet = getSheet_();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  const data = sheet.getRange(2, 1, lastRow - 1, HEADERS.length).getValues();
+
+  return data.filter(row => row[COL.nationalId - 1]).map(row => {
+    const person = rowToPerson_(row);
+    if (person.dayNumber && person.dayNumber >= 1) {
+      const dayValues = getAttendDayValues_(person.nationalId);
+      const todayVal = dayValues[person.dayNumber - 1] || '';
+      person.todayStatus = (todayVal && todayVal !== '0') ? 'present' : 'absent';
+    } else {
+      person.todayStatus = 'absent';
+    }
+    return person;
+  });
+}
+
+function adminDeletePerson(nationalId, token) {
+  if (!isAdminUnlocked_(token)) throw new Error('Not authorized.');
+  const sheet = getSheet_();
+  const found = findRow_(sheet, nationalId);
+  if (!found) throw new Error('Not found.');
+  sheet.deleteRow(found.rowNum);
+  return { success: true };
+}
+
+// ---------------------------------------------------------------------
+// TEAMS / BATCHES (admin-only)
+// ---------------------------------------------------------------------
+// Every batch is its OWN sheet (tab) in the spreadsheet — e.g. a tab named
+// "8/10" or "21/10". Create a tab, name it after the batch, and put the
+// trainees in it (header row = row 1). Any tab that is not one of the
+// system sheets (Entries, Attend, data base, quality, users, log) is treated as a batch.
+//
+// Columns are found by HEADER NAME (any order, case/spaces ignored):
+//   National ID : "National ID" / "ID"
+//   Name        : "Name"
+//   PC          : "PC" / "PC No" / "PC Name"
+//   Yubikey     : "Yubikey" / "Yubikey Email" / "Flash" / "Email"
+//   Comment Day 1-3 / Rating Day 1-3 / Feedback : created automatically on first save if missing
+// Missing National ID / Name / Yubikey are filled from the "Entries" sheet
+// (matched by National ID, or by PC). Attendance comes from "Attend".
+const BATCH_COLUMN_ALIASES = {
+  nationalId: ['nationalid', 'id', 'nid', 'nationalidnumber'],
+  name: ['name', 'fullname', 'traineename', 'labelername'],
+  pc: ['pc', 'pcno', 'pcname', 'pcnumber', 'pcid'],
+  flash: ['yubikey', 'yubikeyemail', 'flash', 'yubikeyid', 'email'],
+  comment: ['comment', 'comments', 'note', 'notes'],
+  rating: ['rating', 'rate', 'stars'],
+  feedback: ['feedback', 'result', 'status']
+};
+// Per-day comment / rating: columns "Comment Day 1..3" and "Rating Day 1..3"
+// (also found as "Comment 1", "Day 1 Comment", ...). The old single "Comment" /
+// "Rating" columns still show as Day 1 until Day 1 is filled in.
+[1, 2, 3].forEach(n => {
+  BATCH_COLUMN_ALIASES['comment' + n] = ['commentday' + n, 'comment' + n, 'day' + n + 'comment', 'commentd' + n];
+  BATCH_COLUMN_ALIASES['rating' + n] = ['ratingday' + n, 'rating' + n, 'day' + n + 'rating', 'ratingd' + n];
 });
 
-// ---------------- Auto refresh (admin tabs, no manual reload) ----------------
-// Teams every 30s, Dashboard / Quality / Admin every 60s. It only runs while the
-// page is visible, you are logged in as admin, and the Teams card is NOT open
-// (so nothing you are typing gets overwritten).
-const AUTO_REFRESH_MS = { teams: 30000, dashboard: 60000, quality: 60000, admin: 60000 };
-var autoLast = {};
-let autoBusy = false;
+function normHeader_(v) { return toStr_(v).toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
-async function autoRefreshTick(){
-  if(!userIsAdmin || autoBusy || document.hidden) return;
-  const active = (document.querySelector('.tab-btn.active') || {}).dataset;
-  const tab = active && active.tab;
-  if(!tab || !AUTO_REFRESH_MS[tab]) return;
-  if(document.getElementById('team-modal').classList.contains('open')) return;
-  if(Date.now() - (autoLast[tab] || 0) < AUTO_REFRESH_MS[tab]) return;
-
-  autoBusy = true;
-  try{
-    if(tab === 'teams') await loadTeams(true);
-    else if(tab === 'dashboard'){
-      await loadDashboard();
-      const search = document.getElementById('dash-search');
-      if(search.value.trim()) search.dispatchEvent(new Event('input')); // keep the search filter applied
+/** Maps nationalId/name/pc/flash/comment -> 0-based column index (or -1). */
+function resolveBatchColumns_(headerRow) {
+  const norm = headerRow.map(normHeader_);
+  const map = {};
+  Object.keys(BATCH_COLUMN_ALIASES).forEach(key => {
+    map[key] = -1;
+    for (let i = 0; i < BATCH_COLUMN_ALIASES[key].length && map[key] === -1; i++) {
+      map[key] = norm.indexOf(BATCH_COLUMN_ALIASES[key][i]);
     }
-    else if(tab === 'quality') await loadQuality();
-    else if(tab === 'admin') await loadAdminTable();
-  }catch(e){ /* ignore, try again next time */ }
-  autoLast[tab] = Date.now();
-  autoBusy = false;
+  });
+  return map;
 }
-setInterval(autoRefreshTick, 5000);
-document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) autoRefreshTick(); });
 
-// ---------------- init ----------------
-(async function init(){
-  await loadAdminStatus();
-  loadTheme();
-})();
-</script>
-</body>
-</html>
+function isBatchSheetName_(name) {
+  const excluded = [SHEET_NAME, ATTEND_SHEET_NAME, DATABASE_SHEET_NAME, QUALITY_SHEET_NAME, USERS_SHEET_NAME, LOG_SHEET_NAME]
+    .map(n => n.toLowerCase());
+  return excluded.indexOf(toStr_(name).toLowerCase()) === -1;
+}
+
+/** Returns every batch (one per extra sheet) with its trainees, today's
+ *  attendance status, and whether they have any task today. */
+function adminGetTeams(token) {
+  if (!isAdminUnlocked_(token)) throw new Error('Not authorized.');
+  const ss = getSpreadsheet_();
+
+  // --- Entries (registered trainees), indexed by National ID and by PC ---
+  const byId = {}, byPc = {};
+  const eSheet = getSheet_();
+  const eLast = eSheet.getLastRow();
+  if (eLast >= 2) {
+    eSheet.getRange(2, 1, eLast - 1, HEADERS.length).getValues().forEach(row => {
+      if (!row[COL.nationalId - 1]) return;
+      const p = rowToPerson_(row);
+      byId[p.nationalId.trim()] = p;
+      if (p.pc) byPc[p.pc.trim().toLowerCase()] = p;
+    });
+  }
+
+  // --- Attend sheet read ONCE ---
+  const attendMap = {};
+  const aSheet = getAttendSheet_();
+  const aLast = aSheet.getLastRow();
+  if (aLast >= 2) {
+    const aCols = Math.max(aSheet.getLastColumn(), 3);
+    aSheet.getRange(2, 1, aLast - 1, aCols).getValues().forEach(r => {
+      attendMap[toStr_(r[0]).trim()] = r.slice(2).map(v => toStr_(v));
+    });
+  }
+
+  // --- Tasks done today per PC, from the "data base" sheet ---
+  let tasksKnown = true;
+  const tasksByPc = {};
+  try {
+    const todayStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'GMT', 'MM/dd/yyyy');
+    readDatabaseRows_().forEach(r => {
+      if (r.datePart === todayStr && r.pcNo) {
+        const k = r.pcNo.trim().toLowerCase();
+        tasksByPc[k] = (tasksByPc[k] || 0) + 1;
+      }
+    });
+  } catch (e) { tasksKnown = false; }
+
+  // --- One batch per extra sheet ---
+  const batches = [];
+  ss.getSheets().forEach(sh => {
+    const name = sh.getName();
+    if (!isBatchSheetName_(name)) return;
+    if (sh.isSheetHidden()) return; // hidden tab in Google Sheets = hidden batch in Teams
+
+    const batch = { name: name, people: [], warning: '' };
+    const lastRow = sh.getLastRow(), lastCol = sh.getLastColumn();
+    if (lastRow < 1 || lastCol < 1) { batches.push(batch); return; }
+
+    const values = sh.getRange(1, 1, lastRow, lastCol).getValues();
+    const cols = resolveBatchColumns_(values[0]);
+    if (cols.pc === -1 && cols.nationalId === -1) {
+      batch.warning = 'Row 1 needs a "PC" (or "National ID") column header.';
+      batches.push(batch);
+      return;
+    }
+    const cell = (row, idx) => idx === -1 ? '' : toStr_(row[idx]).trim();
+
+    for (let i = 1; i < values.length; i++) {
+      const row = values[i];
+      let nid = cell(row, cols.nationalId);
+      let pc = cell(row, cols.pc);
+      if (!nid && !pc) continue; // blank row
+
+      // Registered trainee (Entries) — by National ID first, then by PC
+      const reg = (nid && byId[nid]) || (pc && byPc[pc.toLowerCase()]) || null;
+      if (!nid && reg) nid = reg.nationalId.trim();
+      if (!pc && reg) pc = reg.pc;
+
+      let todayVal = '';
+      let attendVals = []; // day1..dayN from the Attend sheet (N = today's day number)
+      if (reg && reg.dayNumber && reg.dayNumber >= 1) {
+        const vals = attendMap[reg.nationalId.trim()] || [];
+        todayVal = vals[reg.dayNumber - 1] || '';
+        attendVals = vals.slice(0, reg.dayNumber);
+        while (attendVals.length < reg.dayNumber) attendVals.push('');
+      }
+      const tasks = tasksByPc[(pc || '').trim().toLowerCase()] || 0;
+
+      const comments = [1, 2, 3].map(n => cell(row, cols['comment' + n]));
+      const ratings = [1, 2, 3].map(n => cell(row, cols['rating' + n]));
+      if (!comments[0]) comments[0] = cell(row, cols.comment); // old single column = Day 1
+      if (!ratings[0]) ratings[0] = cell(row, cols.rating);
+
+      batch.people.push({
+        key: name + '|' + (i + 1),
+        batch: name,
+        rowNum: i + 1,
+        nationalId: nid,
+        name: cell(row, cols.name) || (reg ? reg.name : ''),
+        pc: pc,
+        flash: cell(row, cols.flash) || (reg ? reg.flash : ''),
+        comments: comments,
+        ratings: ratings,
+        feedback: cell(row, cols.feedback),
+        attend: attendVals,
+        dayNumber: reg ? reg.dayNumber : null,
+        stage: reg ? reg.stage : '',
+        todayStatus: (todayVal && todayVal !== '0') ? 'present' : 'absent',
+        noTask: tasksKnown && tasks === 0
+      });
+    }
+    batch.people.sort((a, b) => (a.pc || '').localeCompare(b.pc || '', undefined, { numeric: true }));
+    batches.push(batch);
+  });
+
+  // Oldest batch first (by day/month in the sheet name); other names after, A-Z.
+  batches.sort((a, b) => {
+    const ka = batchSortKey_(a.name), kb = batchSortKey_(b.name);
+    if (ka !== null && kb !== null) return ka - kb;
+    if (ka !== null) return -1;
+    if (kb !== null) return 1;
+    return a.name.localeCompare(b.name, undefined, { numeric: true });
+  });
+  return { success: true, batches: batches };
+}
+
+const FEEDBACK_VALUES = ['Pass', 'Failed', 'Pending', 'Dropped out'];
+
+/** Saves, per day (Day 1, Day 2, Day 3): a Comment and a Rating (1-5 or empty),
+ *  plus one Feedback (Pass / Failed / Pending / Dropped out, or empty), into the
+ *  batch sheet itself — columns "Comment Day 1..3", "Rating Day 1..3",
+ *  "Feedback" (created if missing). The comments are also mirrored (joined) into
+ *  "Entries" together with the feedback, when the trainee is registered there. */
+function adminSaveComment(batchName, rowNum, comments, ratings, feedback, token) {
+  if (!isAdminUnlocked_(token)) throw new Error('Not authorized.');
+  if (!isBatchSheetName_(batchName)) throw new Error('Invalid batch.');
+  const sh = getSpreadsheet_().getSheetByName(toStr_(batchName));
+  if (!sh) throw new Error('Batch sheet not found.');
+  const r = parseInt(rowNum, 10);
+  if (!r || r < 2 || r > sh.getLastRow()) throw new Error('Row not found.');
+
+  const cm = [0, 1, 2].map(i => toStr_(Array.isArray(comments) ? comments[i] : ''));
+  const rt = [0, 1, 2].map(i => toStr_(Array.isArray(ratings) ? ratings[i] : '').trim());
+  rt.forEach(v => { if (v !== '' && !/^[1-5]$/.test(v)) throw new Error('Rating must be 1 to 5.'); });
+  const fb = toStr_(feedback).trim();
+  if (fb !== '' && FEEDBACK_VALUES.indexOf(fb) === -1) throw new Error('Invalid feedback.');
+
+  let lastCol = Math.max(sh.getLastColumn(), 1);
+  const header = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  const cols = resolveBatchColumns_(header);
+
+  // Finds the 1-based column for a field, creating a header if it is missing.
+  const ensureCol = (idx, label) => {
+    if (idx !== -1) return idx + 1;
+    lastCol++;
+    sh.getRange(1, lastCol).setValue(label);
+    return lastCol;
+  };
+  for (let i = 0; i < 3; i++) {
+    const n = i + 1;
+    const cCol = ensureCol(cols['comment' + n], 'Comment Day ' + n);
+    const rCol = ensureCol(cols['rating' + n], 'Rating Day ' + n);
+    sh.getRange(r, cCol).setValue(cm[i]);
+    sh.getRange(r, rCol).setValue(rt[i] === '' ? '' : Number(rt[i]));
+  }
+  const feedbackCol = ensureCol(cols.feedback, 'Feedback');
+  sh.getRange(r, feedbackCol).setValue(fb);
+
+  // Mirror into Entries (joined comments + feedback) when this trainee is registered there
+  try {
+    const nid = cols.nationalId === -1 ? '' : toStr_(sh.getRange(r, cols.nationalId + 1).getValue()).trim();
+    if (nid) {
+      const eSheet = getSheet_();
+      const found = findRow_(eSheet, nid);
+      if (found) {
+        const joined = cm.map((c, i) => c.trim() ? 'Day ' + (i + 1) + ': ' + c.trim() : '').filter(Boolean).join(' | ');
+        eSheet.getRange(found.rowNum, COL.comment).setValue(joined);
+        eSheet.getRange(found.rowNum, COL.feedback).setValue(fb); // Pass / Failed / Pending / Dropped out
+      }
+    }
+  } catch (e) { /* non-fatal */ }
+  try { ensureDropoutRowRule_(sh, feedbackCol); } catch (e) { /* non-fatal */ }
+  return { success: true };
+}
+
+// ---------------------------------------------------------------------
+// DASHBOARD (admin-only) — reads from the existing "data base" sheet
+// ---------------------------------------------------------------------
+// This is a separate, pre-existing sheet (not created/managed by this
+// script) that logs labeling submissions. Columns are found by HEADER NAME (see
+// DB_HEADER_ALIASES); the layout below is only the fallback position (1-based):
+// 1 TIMESTAMP | 2 SHIFT | 3 UNIT | 4 QTC NAME | 5 YUBIKEY EMAIL |
+// 6 LABELER NAME | 7 PC NO | 8 MODALITY | 9 QUEUE NAME | 10 ID |
+// 11 OBJECT COUNT | 12 PASS | 13 STAGE | 14 CREATED AT
+const DATABASE_SHEET_NAME = 'data base';
+const DB_COL = {
+  timestamp: 1, shift: 2, unit: 3, qtcName: 4, yubikeyEmail: 5, labelerName: 6,
+  pcNo: 7, modality: 8, queueName: 9, id: 10, objectCount: 11, pass: 12, stage: 13, createdAt: 14
+};
+
+function getDatabaseSheet_() {
+  const ss = getSpreadsheet_();
+  const sheet = ss.getSheetByName(DATABASE_SHEET_NAME);
+  if (!sheet) throw new Error('Sheet "' + DATABASE_SHEET_NAME + '" not found.');
+  return sheet;
+}
+
+/** Formats a cell value for display: Date objects become a readable
+ *  "MM/dd/yyyy, h:mm:ss a" string (like the sheet shows them); everything
+ *  else is coerced to a plain string. */
+function formatDbCell_(v) {
+  if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v.getTime())) {
+    return Utilities.formatDate(v, Session.getScriptTimeZone() || 'GMT', 'MM/dd/yyyy, h:mm:ss a');
+  }
+  return toStr_(v);
+}
+
+// Header names the "data base" sheet may use for each field (case / spaces /
+// symbols ignored, first match wins). Because columns are found by NAME you can
+// freely reorder the sheet's columns. If a header is not found, the old fixed
+// position in DB_COL is used as a fallback.
+const DB_HEADER_ALIASES = {
+  timestamp: ['timestamp', 'datetime', 'time', 'date'],
+  shift: ['shift'],
+  unit: ['unit', 'room'],
+  qtcName: ['qtcname', 'qtc'],
+  yubikeyEmail: ['yubikeyemail', 'yubikey', 'email'],
+  labelerName: ['labelername', 'labeler', 'name'],
+  pcNo: ['pcno', 'pcnumber', 'pcname', 'pc'],
+  modality: ['modality'],
+  queueName: ['queuename', 'queue'],
+  id: ['id', 'taskid'],
+  objectCount: ['objectcount', 'objectscount', 'objects', 'count'],
+  pass: ['pass', 'result'],
+  stage: ['stage'],
+  createdAt: ['createdat', 'created']
+};
+
+/** Maps every field -> 1-based column number, by header name (fallback: DB_COL). */
+function resolveDbColumns_(headerRow) {
+  const norm = headerRow.map(normHeader_);
+  const map = {};
+  Object.keys(DB_HEADER_ALIASES).forEach(key => {
+    let idx = -1;
+    const aliases = DB_HEADER_ALIASES[key];
+    for (let i = 0; i < aliases.length && idx === -1; i++) idx = norm.indexOf(aliases[i]);
+    map[key] = idx !== -1 ? idx + 1 : DB_COL[key];
+  });
+  return map;
+}
+
+/** Reads every row from the "data base" sheet into plain objects, using the
+ *  header row to find each column. Rows with no ID are skipped. */
+function readDatabaseRows_() {
+  const sheet = getDatabaseSheet_();
+  const lastRow = sheet.getLastRow();
+  const lastCol = Math.max(sheet.getLastColumn(), 14);
+  if (lastRow < 2) return [];
+  const all = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  const c = resolveDbColumns_(all[0]);
+  const data = all.slice(1);
+
+  const rows = data
+    .filter(row => toStr_(row[c.id - 1]) !== '')
+    .map(row => {
+      const timestamp = formatDbCell_(row[c.timestamp - 1]);
+      return {
+        timestamp: timestamp,
+        datePart: timestamp ? timestamp.split(',')[0].trim() : '',
+        shift: toStr_(row[c.shift - 1]),
+        unit: toStr_(row[c.unit - 1]),
+        qtcName: toStr_(row[c.qtcName - 1]),
+        yubikeyEmail: toStr_(row[c.yubikeyEmail - 1]),
+        labelerName: toStr_(row[c.labelerName - 1]),
+        pcNo: toStr_(row[c.pcNo - 1]),
+        modality: toStr_(row[c.modality - 1]),
+        queueName: toStr_(row[c.queueName - 1]),
+        id: toStr_(row[c.id - 1]),
+        objectCount: Number(row[c.objectCount - 1]) || 0,
+        pass: toStr_(row[c.pass - 1]),
+        stage: toStr_(row[c.stage - 1]),
+        createdAt: formatDbCell_(row[c.createdAt - 1])
+      };
+    });
+
+  // Name and PC come from the BATCH sheet (matched by Yubikey); the data base
+  // values stay only when the Yubikey is not found in any batch.
+  const roster = getBatchRoster_();
+  rows.forEach(r => {
+    const k = yubikeyKey_(r.yubikeyEmail);
+    const info = k ? roster.byKey[k] : null;
+    if (!info) return;
+    if (info.name) r.labelerName = info.name;
+    if (info.pc) r.pcNo = info.pc;
+  });
+  return rows;
+}
+
+function distinctSorted_(rows, field) {
+  const seen = {};
+  rows.forEach(r => { if (r[field]) seen[r[field]] = true; });
+  return Object.keys(seen).sort();
+}
+
+function topCounts_(rows, field) {
+  const m = {};
+  rows.forEach(r => { const k = r[field] || '(none)'; m[k] = (m[k] || 0) + 1; });
+  return Object.keys(m).map(k => ({ name: k, count: m[k] })).sort((a, b) => b.count - a.count);
+}
+
+/** Main dashboard data endpoint. `filters` is optional:
+ *  { date, shift, modality, queueName, pass } — each a single exact-match
+ *  string, or omitted/empty to not filter on that dimension.
+ *  Returns everything the Dashboard tab needs in one call: PC cards,
+ *  the row-detail table (capped at 500 rows for payload size — the
+ *  aggregates below are computed on the FULL filtered set, not the cap),
+ *  queue totals, modality/pass breakdown, object count stats, top
+ *  QTC/Labeler lists, and filter dropdown options (always from the full
+ *  unfiltered dataset, so the dropdowns never shrink as you filter). */
+function getDashboardData(filters, token) {
+  if (!isAdminUnlocked_(token)) throw new Error('Not authorized.');
+  filters = filters || {};
+
+  const allRows = readDatabaseRows_();
+
+  let rows = allRows;
+  if (filters.date) rows = rows.filter(r => r.datePart === filters.date);
+  if (filters.shift) rows = rows.filter(r => r.shift === filters.shift);
+  if (filters.modality) rows = rows.filter(r => r.modality === filters.modality);
+  if (filters.queueName) rows = rows.filter(r => r.queueName === filters.queueName);
+  if (filters.pass) rows = rows.filter(r => r.pass === filters.pass);
+  if (filters.unit) rows = rows.filter(r => r.unit === filters.unit); // "Room" filter (stored as UNIT in the sheet)
+  if (filters.yubikeyEmail) rows = rows.filter(r => r.yubikeyEmail === filters.yubikeyEmail);
+
+  // ---- PC cards (grouped by PC NO) ----
+  const pcMap = {};
+  rows.forEach(r => {
+    if (!r.pcNo) return;
+    if (!pcMap[r.pcNo]) pcMap[r.pcNo] = { pcNo: r.pcNo, labelerName: '', yubikeyEmail: '', total: 0, queues: {} };
+    const card = pcMap[r.pcNo];
+    card.total++;
+    if (r.labelerName) card.labelerName = r.labelerName;
+    if (r.yubikeyEmail) card.yubikeyEmail = r.yubikeyEmail;
+    card.queues[r.queueName || '(none)'] = (card.queues[r.queueName || '(none)'] || 0) + 1;
+  });
+  const pcCards = Object.keys(pcMap).map(k => {
+    const c = pcMap[k];
+    return {
+      pcNo: c.pcNo, labelerName: c.labelerName, yubikeyEmail: c.yubikeyEmail, total: c.total,
+      queues: Object.keys(c.queues).map(q => ({ queueName: q, count: c.queues[q] }))
+    };
+  }).sort((a, b) => a.pcNo.localeCompare(b.pcNo, undefined, { numeric: true }));
+
+  // ---- Queue totals (Queue x Pass grid) ----
+  const queueMap = {};
+  const passSeen = {};
+  rows.forEach(r => {
+    const q = r.queueName || '(none)';
+    const p = r.pass || '(none)';
+    if (!queueMap[q]) queueMap[q] = {};
+    queueMap[q][p] = (queueMap[q][p] || 0) + 1;
+    passSeen[p] = true;
+  });
+  const passColumns = Object.keys(passSeen).sort();
+  const queueRows = Object.keys(queueMap).map(q => {
+    const counts = {};
+    let total = 0;
+    passColumns.forEach(p => { const c = queueMap[q][p] || 0; counts[p] = c; total += c; });
+    return { queueName: q, counts: counts, total: total };
+  });
+  const grandTotal = { counts: {}, total: 0 };
+  passColumns.forEach(p => grandTotal.counts[p] = 0);
+  queueRows.forEach(row => { passColumns.forEach(p => grandTotal.counts[p] += row.counts[p]); grandTotal.total += row.total; });
+
+  // ---- Modality & Pass breakdown ----
+  const modPassMap = {};
+  rows.forEach(r => {
+    const key = (r.modality || '(none)') + ' — ' + (r.pass || '(none)');
+    modPassMap[key] = (modPassMap[key] || 0) + 1;
+  });
+  const totalRows = rows.length;
+  const modalityPass = Object.keys(modPassMap).map(k => ({
+    label: k, count: modPassMap[k], pct: totalRows ? Math.round((modPassMap[k] / totalRows) * 100) : 0
+  })).sort((a, b) => b.count - a.count);
+
+  // ---- Object count ----
+  const totalObjects = rows.reduce((s, r) => s + (r.objectCount || 0), 0);
+  const avgPerTask = totalRows ? (totalObjects / totalRows) : 0;
+
+  return {
+    success: true,
+    totalRows: totalRows,
+    rows: rows.slice(0, 500),
+    rowsCapped: totalRows > 500,
+    pcCards: pcCards,
+    queueTotals: { passColumns: passColumns, rows: queueRows, grandTotal: grandTotal },
+    modalityPass: modalityPass,
+    objectCount: { total: totalObjects, avgPerTask: avgPerTask, taskCount: totalRows },
+    topQTC: topCounts_(rows, 'qtcName').slice(0, 15),
+    topLabeler: topCounts_(rows, 'labelerName').slice(0, 15),
+    filterOptions: {
+      dates: distinctSorted_(allRows, 'datePart'),
+      shifts: distinctSorted_(allRows, 'shift'),
+      modalities: distinctSorted_(allRows, 'modality'),
+      queues: distinctSorted_(allRows, 'queueName'),
+      passValues: distinctSorted_(allRows, 'pass'),
+      rooms: distinctSorted_(allRows, 'unit'),
+      yubikeys: distinctSorted_(allRows, 'yubikeyEmail')
+    }
+  };
+}
+
+// ---------------------------------------------------------------------
+// QUALITY (admin-only) — reads from the existing "quality" sheet
+// ---------------------------------------------------------------------
+// The sheet has MANY columns (per-category breakdowns etc.), and some
+// header names — like "Total Accuracy" — appear more than once (e.g. a
+// per-category "Total Accuracy" earlier in the row, then the real overall
+// one further right). So columns are resolved DYNAMICALLY by matching the
+// header row text, not by a fixed column number. When a header name
+// appears more than once, the LAST (rightmost) occurrence wins, since
+// that's consistently the "final/overall" column in this sheet's layout.
+const QUALITY_SHEET_NAME = 'quality';
+const QUALITY_HEADER_NAMES = {
+  taskName: 'Task Name',
+  taskId: 'Task ID',
+  submittedDate: 'Submitted Date',
+  email: 'Email',
+  artifacts: 'Artifacts',
+  attribute: 'Attribute',
+  totalAccuracy: 'Total Accuracy'
+};
+
+function getQualitySheet_() {
+  const ss = getSpreadsheet_();
+  const sheet = ss.getSheetByName(QUALITY_SHEET_NAME);
+  if (!sheet) throw new Error('Sheet "' + QUALITY_SHEET_NAME + '" not found.');
+  return sheet;
+}
+
+/** Scans the "quality" sheet's header row (row 1) and returns a map of
+ *  { taskName, taskId, ... } -> 1-based column number. If a header name
+ *  appears multiple times, the LAST (rightmost) match wins. Missing
+ *  headers resolve to null. */
+function resolveQualityColumns_(sheet) {
+  const lastCol = sheet.getLastColumn();
+  const headerRow = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const colMap = {};
+  Object.keys(QUALITY_HEADER_NAMES).forEach(key => colMap[key] = null);
+
+  headerRow.forEach((h, idx) => {
+    const hStr = toStr_(h).trim().toLowerCase();
+    Object.keys(QUALITY_HEADER_NAMES).forEach(key => {
+      if (hStr === QUALITY_HEADER_NAMES[key].toLowerCase()) {
+        colMap[key] = idx + 1; // keep overwriting left-to-right so the LAST match wins
+      }
+    });
+  });
+  return colMap;
+}
+
+/** Formats a number as a percentage string, preserving up to 2 decimals
+ *  (matching how the sheet displays it, e.g. "96.62%"). Accepts either a
+ *  0-1 fraction (Sheets' native percent storage) or an already-scaled
+ *  0-100 number. */
+function formatPercent_(v) {
+  if (v === null || v === undefined || v === '') return '';
+  const num = Number(v);
+  if (isNaN(num)) return toStr_(v);
+  const pct = num <= 1 ? num * 100 : num;
+  const rounded = Math.round(pct * 100) / 100;
+  const str = rounded.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  return str + '%';
+}
+
+function readQualityRows_() {
+  const sheet = getQualitySheet_();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  const colMap = resolveQualityColumns_(sheet);
+  if (!colMap.taskId) {
+    throw new Error('Could not find a "Task ID" column in the "quality" sheet header row.');
+  }
+
+  const lastCol = sheet.getLastColumn();
+  const data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  const get = (row, col) => col ? row[col - 1] : '';
+
+  return data
+    .filter(row => toStr_(get(row, colMap.taskId)) !== '')
+    .map(row => ({
+      taskName: toStr_(get(row, colMap.taskName)),
+      taskId: toStr_(get(row, colMap.taskId)),
+      submittedDate: formatDbCell_(get(row, colMap.submittedDate)),
+      submittedDateRaw: get(row, colMap.submittedDate),
+      email: toStr_(get(row, colMap.email)),
+      artifacts: formatPercent_(get(row, colMap.artifacts)),
+      attribute: formatPercent_(get(row, colMap.attribute)),
+      totalAccuracy: formatPercent_(get(row, colMap.totalAccuracy))
+    }));
+}
+
+/** Quality dashboard data endpoint. `filters` is optional: { email } —
+ *  when omitted, returns every row from every email. Task history is
+ *  sorted newest-first. */
+function getQualityData(filters, token) {
+  if (!isAdminUnlocked_(token)) throw new Error('Not authorized.');
+  filters = filters || {};
+
+  const allRows = readQualityRows_();
+  let rows = allRows;
+  if (filters.email) rows = rows.filter(r => r.email === filters.email);
+
+  rows = rows.slice().sort((a, b) => {
+    const da = (a.submittedDateRaw instanceof Date) ? a.submittedDateRaw.getTime() : 0;
+    const db = (b.submittedDateRaw instanceof Date) ? b.submittedDateRaw.getTime() : 0;
+    return db - da;
+  });
+
+  return {
+    success: true,
+    taskCount: rows.length,
+    tasks: rows.map(r => ({
+      taskName: r.taskName, taskId: r.taskId, submittedDate: r.submittedDate,
+      artifacts: r.artifacts, attribute: r.attribute, totalAccuracy: r.totalAccuracy
+    })),
+    filterOptions: { emails: distinctSorted_(allRows, 'email') }
+  };
+}
+
+// ---------------------------------------------------------------------
+// Theme (kept from previous version)
+// ---------------------------------------------------------------------
+function getTheme() {
+  try { return PropertiesService.getUserProperties().getProperty('theme') || 'dark'; }
+  catch (e) { return 'dark'; }
+}
+function setTheme(mode) {
+  try { PropertiesService.getUserProperties().setProperty('theme', mode); return true; }
+  catch (e) { return false; }
+}
+
+// ---------------------------------------------------------------------
+// One-time manual test — run from the editor (▶ Run) to sanity check.
+// ---------------------------------------------------------------------
+function testSetup() {
+  const nid = '29901010112345';
+  const token = issueAdminToken_('__test__'); // temporary admin token for this test
+  try { adminDeletePerson(nid, token); } catch (e) {}
+  adminAddPerson({ nationalId: nid, name: 'Test Person', pc: '00', flash: '000000', room: '106', shift: 'M', stage: STAGE_ORDER[0] }, token);
+  Logger.log(JSON.stringify(checkIn(nid)));
+  Logger.log(JSON.stringify(getAttendanceMonth(nid, new Date().getFullYear(), new Date().getMonth() + 1)));
+  Logger.log(JSON.stringify(advanceStage(nid, STAGE_ORDER[1])));
+  Logger.log('Attend sheet row after check-in: ' + JSON.stringify(syncAllAttendanceNow()));
+  Logger.log('Teams: ' + JSON.stringify(adminGetTeams(token)));
+  adminDeletePerson(nid, token);
+  lockAdmin(token);
+  Logger.log('Test finished OK.');
+}
