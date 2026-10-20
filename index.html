@@ -269,6 +269,12 @@
   .fb-btn.active[data-fb="Pending"]{ background:rgba(232,163,61,.18); border-color:var(--amber); color:var(--amber); }
   .fb-btn.active[data-fb="Dropped out"]{ background:rgba(163,116,232,.2); border-color:var(--phase2); color:var(--phase2); }
 
+  .day-tabs{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:2px; }
+  .day-tab{ position:relative; background:var(--panel-2); border:1px solid var(--line); color:var(--text); font-family:'Space Grotesk',sans-serif;
+    font-weight:800; font-size:13px; padding:9px 6px; border-radius:10px; cursor:pointer; }
+  .day-tab:hover{ border-color:var(--amber); }
+  .day-tab.active{ background:var(--amber); color:#1a1206; border-color:var(--amber); }
+  .day-tab.has::after{ content:""; position:absolute; top:6px; right:7px; width:7px; height:7px; border-radius:50%; background:var(--ok); }
   .att-summary{ font-size:12.5px; color:var(--muted); margin:2px 0 8px; text-align:left; }
   .att-summary b{ color:var(--text); }
   .att-chips{ display:flex; flex-wrap:wrap; gap:5px; }
@@ -308,7 +314,7 @@
     transition:top .05s linear;
   }
 
-  /* ===== Splash Screen: "Meeg" rising out of glowing water (water line = mid-screen) ===== */
+  /* ===== Splash Screen: "meeg" rising out of glowing water (water line = mid-screen) ===== */
   body.has-splash{ overflow:hidden; }
   #splash{
     position:fixed; inset:0; z-index:9999;
@@ -420,7 +426,7 @@
                   <div class="grid">
                     <div><label>National ID</label><input id="ci-nid" placeholder="Enter your National ID" inputmode="numeric"></div>
                   </div>
-                  <div class="actions-row"><button class="btn" id="ci-start-btn">Start Tracker</button><button class="btn secondary" id="ci-register-link">Login</button></div>
+                  <div class="actions-row"><button class="btn" id="ci-start-btn">Start Tracker</button><button class="btn secondary" id="ci-register-link">Logup</button></div>
                   <div id="ci-pass-wrap" style="display:none;margin-top:14px">
                     <label>Password</label>
                     <input id="ci-pass" type="password" placeholder="Enter your password" autocomplete="current-password">
@@ -651,7 +657,7 @@
       <h2>Register New Trainee</h2>
       <div class="grid">
         <div><label>National ID</label><input id="a-nid" placeholder="14 digits"></div>
-        <div><label>Name</label><input id="a-name" placeholder="Full name"></div>
+        <div><label>Name (optional, taken from the batch)</label><input id="a-name" placeholder="Full name"></div>
         <div><label>PC</label><input id="a-pc" placeholder="e.g. PC-14"></div>
         <div><label>Yubikey</label><input id="a-flash" placeholder="ME000000"></div>
         <div><label>Room</label>
@@ -677,6 +683,10 @@
         <button class="btn secondary" id="a-format-btn">🎨 Colorize Attend Sheet</button>
       </div>
       <div id="a-format-msg"></div>
+      <div class="actions-row" style="margin-top:8px">
+        <button class="btn secondary" id="a-trigger-btn">⏰ Auto-mark absences every day</button>
+      </div>
+      <div id="a-trigger-msg"></div>
     </div>
     <div class="panel">
       <h2>All Trainees</h2>
@@ -695,9 +705,15 @@
     <div class="tm-status" id="tm-status">—</div>
     <div class="tm-chip"><div class="lab">Yubikey</div><div class="val" id="tm-flash">—</div></div>
     <div class="tm-chip"><div class="lab">Name</div><div class="val" id="tm-name">—</div></div>
-    <label>Comment</label>
+    <label>Day</label>
+    <div class="day-tabs" id="tm-days">
+      <button type="button" class="day-tab active" data-day="1">Day 1</button>
+      <button type="button" class="day-tab" data-day="2">Day 2</button>
+      <button type="button" class="day-tab" data-day="3">Day 3</button>
+    </div>
+    <label id="tm-comment-label">Comment — Day 1</label>
     <textarea id="tm-comment" placeholder="اكتب تعليقك هنا..."></textarea>
-    <label>Rating</label>
+    <label id="tm-rating-label">Rating — Day 1</label>
     <div class="stars" id="tm-stars">
       <span data-v="1">★</span><span data-v="2">★</span><span data-v="3">★</span><span data-v="4">★</span><span data-v="5">★</span>
     </div>
@@ -770,7 +786,7 @@ function saveAdminToken(t){
 }
 const ADMIN_FNS = ['isAdminUnlocked','lockAdmin','adminFormatAttendSheet','adminSyncAllAttendance',
   'adminAddPerson','adminGetAllPeople','adminDeletePerson','adminGetTeams','adminSaveComment',
-  'getDashboardData','getQualityData'];
+  'getDashboardData','getQualityData','adminSetupDailyTrigger'];
 
 function runScript(fnName, ...args){
   if(ADMIN_FNS.indexOf(fnName) !== -1) args.push(adminToken); // token is always the LAST argument
@@ -1275,7 +1291,7 @@ document.getElementById('a-add-btn').addEventListener('click', async ()=>{
   const shift = document.getElementById('a-shift').value;
   const msgEl = document.getElementById('a-msg');
 
-  if(!nationalId || !name){ msgEl.innerHTML = '<div class="msg err">National ID and Name are required.</div>'; return; }
+  if(!nationalId){ msgEl.innerHTML = '<div class="msg err">National ID is required.</div>'; return; }
 
   const btn = document.getElementById('a-add-btn');
   btn.disabled = true;
@@ -1318,6 +1334,20 @@ document.getElementById('a-format-btn').addEventListener('click', async ()=>{
     msgEl.innerHTML = '<div class="msg err">' + escapeHtml(errText(e)) + '</div>';
   }
   btn.disabled = false; btn.textContent = '🎨 Colorize Attend Sheet';
+});
+
+document.getElementById('a-trigger-btn').addEventListener('click', async ()=>{
+  const btn = document.getElementById('a-trigger-btn');
+  const msgEl = document.getElementById('a-trigger-msg');
+  btn.disabled = true;
+  msgEl.innerHTML = '';
+  try{
+    const res = await runScript('adminSetupDailyTrigger');
+    msgEl.innerHTML = '<div class="msg ok">' + (res.already ? 'Auto-mark is already on ✓' : 'Auto-mark is on ✓ (every night ~00:30, and instantly when a row in Attend reaches two 0)') + '</div>';
+  }catch(e){
+    msgEl.innerHTML = '<div class="msg err">' + escapeHtml(errText(e)) + '</div>';
+  }
+  btn.disabled = false;
 });
 
 async function loadAdminTable(){
@@ -1564,7 +1594,9 @@ let teamsPeopleMap = {};     // key -> person
 let teamsBatches = [];       // [{name, people:[...], warning}] oldest -> newest
 let teamsSelectedBatch = null;
 let teamsCurrentKey = null;
-let tmRating = 0;        // 0 = no rating
+let tmDay = 1;           // 1..3 = Day 1 / Day 2 / Day 3
+let tmComments = ['', '', ''];
+let tmRatings = [0, 0, 0];   // 0 = no rating
 let tmFeedback = '';     // '' | Pass | Failed | Pending | Dropped out
 
 // Same colors as the Attend sheet in Google Sheets
@@ -1613,9 +1645,32 @@ function renderTeamStage(p){
 
 function paintStars(){
   document.querySelectorAll('#tm-stars span').forEach(sp=>{
-    sp.classList.toggle('on', parseInt(sp.getAttribute('data-v'),10) <= tmRating);
+    sp.classList.toggle('on', parseInt(sp.getAttribute('data-v'),10) <= tmRatings[tmDay-1]);
   });
 }
+function paintDayTabs(){
+  document.querySelectorAll('#tm-days .day-tab').forEach(b=>{
+    const d = parseInt(b.getAttribute('data-day'), 10);
+    b.classList.toggle('active', d === tmDay);
+    b.classList.toggle('has', !!(String(tmComments[d-1] || '').trim() || tmRatings[d-1]));
+  });
+  document.getElementById('tm-comment-label').textContent = 'Comment — Day ' + tmDay;
+  document.getElementById('tm-rating-label').textContent = 'Rating — Day ' + tmDay;
+}
+function selectDay(d){
+  tmComments[tmDay-1] = document.getElementById('tm-comment').value; // keep what was typed
+  tmDay = d;
+  document.getElementById('tm-comment').value = tmComments[tmDay-1] || '';
+  paintStars();
+  paintDayTabs();
+}
+document.querySelectorAll('#tm-days .day-tab').forEach(b=>{
+  b.addEventListener('click', ()=> selectDay(parseInt(b.getAttribute('data-day'), 10)));
+});
+document.getElementById('tm-comment').addEventListener('input', (e)=>{
+  tmComments[tmDay-1] = e.target.value;
+  paintDayTabs();
+});
 function paintFeedback(){
   document.querySelectorAll('#tm-feedback .fb-btn').forEach(b=>{
     b.classList.toggle('active', b.getAttribute('data-fb') === tmFeedback);
@@ -1624,8 +1679,9 @@ function paintFeedback(){
 document.querySelectorAll('#tm-stars span').forEach(sp=>{
   sp.addEventListener('click', ()=>{
     const v = parseInt(sp.getAttribute('data-v'),10);
-    tmRating = (tmRating === v) ? 0 : v; // tap the same star again to clear
+    tmRatings[tmDay-1] = (tmRatings[tmDay-1] === v) ? 0 : v; // tap the same star again to clear
     paintStars();
+    paintDayTabs();
   });
 });
 document.querySelectorAll('#tm-feedback .fb-btn').forEach(b=>{
@@ -1665,9 +1721,15 @@ async function loadTeams(silent){
 // "!" badge: rating of 3 or less (1-3), or the trainee has a comment.
 function attentionReasons(p){
   const out = [];
-  const r = parseInt(p.rating, 10);
-  if(r >= 1 && r <= 3) out.push('Rating ' + r);
-  if((p.comment || '').trim() !== '') out.push('Has a comment');
+  const ratings = Array.isArray(p.ratings) ? p.ratings : [];
+  const comments = Array.isArray(p.comments) ? p.comments : [];
+  for(let i = 0; i < 3; i++){
+    const r = parseInt(ratings[i], 10);
+    if(r >= 1 && r <= 3) out.push('Day ' + (i+1) + ' rating ' + r);
+  }
+  for(let i = 0; i < 3; i++){
+    if(String(comments[i] || '').trim() !== '') out.push('Day ' + (i+1) + ' comment');
+  }
   return out;
 }
 // Don't print "Batch BATCH. 11 October" when the sheet name already says batch.
@@ -1726,10 +1788,12 @@ function openTeamModal(key){
   st.className = 'tm-status ' + p.todayStatus;
   document.getElementById('tm-flash').textContent = p.flash || '—';
   document.getElementById('tm-name').textContent = p.name || '—';
-  document.getElementById('tm-comment').value = p.comment || '';
-  tmRating = parseInt(p.rating, 10) || 0;
+  tmDay = 1;
+  tmComments = [0, 1, 2].map(i => (p.comments && p.comments[i]) || '');
+  tmRatings = [0, 1, 2].map(i => parseInt(p.ratings && p.ratings[i], 10) || 0);
+  document.getElementById('tm-comment').value = tmComments[0];
   tmFeedback = p.feedback || '';
-  paintStars(); paintFeedback();
+  paintStars(); paintFeedback(); paintDayTabs();
   renderTeamAttendance(p);
   renderTeamStage(p);
   document.getElementById('tm-msg').innerHTML = '';
@@ -1745,12 +1809,13 @@ document.getElementById('tm-save').addEventListener('click', async ()=>{
   if(!p) return;
   const btn = document.getElementById('tm-save');
   const msgEl = document.getElementById('tm-msg');
-  const comment = document.getElementById('tm-comment').value;
+  tmComments[tmDay-1] = document.getElementById('tm-comment').value; // current day's text
+  const ratingsOut = tmRatings.map(v => v ? String(v) : '');
   btn.disabled = true; btn.textContent = 'Saving…';
   msgEl.innerHTML = '';
   try{
-    await runScript('adminSaveComment', p.batch, p.rowNum, comment, tmRating ? String(tmRating) : '', tmFeedback);
-    p.comment = comment; p.rating = tmRating ? String(tmRating) : ''; p.feedback = tmFeedback;
+    await runScript('adminSaveComment', p.batch, p.rowNum, tmComments, ratingsOut, tmFeedback);
+    p.comments = tmComments.slice(); p.ratings = ratingsOut; p.feedback = tmFeedback;
     renderTeams(); // update the ! badge on the tiles
     msgEl.innerHTML = '<div class="msg ok">Saved ✓</div>';
   }catch(e){
