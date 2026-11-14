@@ -314,7 +314,7 @@
     transition:top .05s linear;
   }
 
-  /* ===== Splash Screen: "Meeg" rising out of glowing water (water line = mid-screen) ===== */
+  /* ===== Splash Screen: "meeg" rising out of glowing water (water line = mid-screen) ===== */
   body.has-splash{ overflow:hidden; }
   #splash{
     position:fixed; inset:0; z-index:9999;
@@ -390,7 +390,7 @@
 
 <div class="wrap">
   <header>
-    <h1> New Hire dashboard</h1>
+    <h1> New Hire Dashboard</h1>
     <div class="header-right">
       <button class="mode-btn" id="edit-mode-btn">🔐 <span id="edit-mode-label">Admin</span></button>
       <button class="mode-btn" id="mode-toggle"><span id="mode-icon">🌙</span><span id="mode-label">Night Mode</span></button>
@@ -687,6 +687,10 @@
         <button class="btn secondary" id="a-trigger-btn">⏰ Auto-mark absences every day</button>
       </div>
       <div id="a-trigger-msg"></div>
+      <div class="actions-row" style="margin-top:8px">
+        <button class="btn secondary" id="a-arrange-btn">🗂 Arrange Attend by batch</button>
+      </div>
+      <div id="a-arrange-msg"></div>
     </div>
     <div class="panel">
       <h2>All Trainees</h2>
@@ -740,13 +744,14 @@ const STAGES = [
   {id:'p1_video', label:'Video Phase One', phase:'phase1'},
   {id:'p1_vehicle', label:'Vehicle', phase:'phase1', link:'https://sites.google.com/meti.ai/training-material/home/unified-taxonomy/vehicles?pli=1&authuser=0'},
   {id:'p1_motorcycle', label:'Motorcycle', phase:'phase1', link:'https://sites.google.com/meti.ai/training-material/home/unified-taxonomy/personal-vehicle/motorcycle'},
+  {id:'p1_task9106', label:'Task Day 1 (9106)', phase:'phase1'},
   {id:'p1_task9661', label:'Task Day 1 (9661)', phase:'phase1'},
   {id:'p1_task3200', label:'Task Day 1 (3200)', phase:'phase1'},
   // ---- Phase 2 ----
   {id:'p2_video', label:'Video Phase Two', phase:'phase2'},
   {id:'p2_signs', label:'Signs', phase:'phase2', link:'https://sites.google.com/meti.ai/training-material/home/unified-taxonomy/inanimate-objects/signs'},
   {id:'p2_dynamicobstacle', label:'Dynamic Obstacle', phase:'phase2', link:'https://sites.google.com/meti.ai/training-material/home/unified-taxonomy/inanimate-objects/dynamic-obstacle'},
-  {id:'p2_debris', label:'Debris', phase:'phase2', link:'https://sites.google.com/meti.ai/training-material/home/unified-taxonomy/inanimate-objects/debris'},
+  {id:'p2_debris', label:'Debris', phase:'phase2', link:'https://sites.google.com/meti.ai/training-material/home/queues/debris-at-road-edge'},
   {id:'p2_cone', label:'Construction Cone', phase:'phase2', link:'https://sites.google.com/meti.ai/training-material/home/unified-taxonomy/inanimate-objects/construction-cone'},
   {id:'p2_barrier', label:'Barrier', phase:'phase2', link:'https://sites.google.com/meti.ai/training-material/home/unified-taxonomy/inanimate-objects/barrier'},
   {id:'p2_vegetation', label:'Vegetation', phase:'phase2', link:'https://sites.google.com/meti.ai/training-material/home/unified-taxonomy/shapeless-objects/vegetation'},
@@ -760,6 +765,7 @@ const STAGES = [
   {id:'p3_mapless', label:'Mapless', phase:'phase3', link:'https://sites.google.com/meti.ai/training-material/home/queues/current-queue/sc3-full-scene-lidar'},
   {id:'p3_signals', label:'Signals', phase:'phase3', link:'https://sites.google.com/meti.ai/training-material/home/queues/sc3-full-scene-new-version/vehicle-signals-labeling'},
   {id:'p3_roadsign', label:'Road Sign', phase:'phase3', link:'https://sites.google.com/meti.ai/training-material/home/queues/sc3-full-scene-new-version/road-sign-labeling'},
+  {id:'p3_nlz', label:'NLZ Labeling', phase:'phase3', link:'https://sites.google.com/meti.ai/training-material/home/queues/sc3-full-scene-2-1-versioning/nlz-labeling'},
   {id:'p3_task7362', label:'Task Day 3 (7362)', phase:'phase3'},
 ];
 const PHASE_LABELS = {phase1:'Phase 1', phase2:'Phase 2', phase3:'Phase 3'};
@@ -782,7 +788,7 @@ function saveAdminToken(t){
 }
 const ADMIN_FNS = ['isAdminUnlocked','lockAdmin','adminFormatAttendSheet','adminSyncAllAttendance',
   'adminAddPerson','adminGetAllPeople','adminDeletePerson','adminGetTeams','adminSaveComment',
-  'getDashboardData','getQualityData','adminSetupDailyTrigger'];
+  'getDashboardData','getQualityData','adminSetupDailyTrigger','adminArrangeAttend'];
 
 // ===== Hosting =====
 // Opened from the Apps Script URL  -> uses google.script.run (nothing to set).
@@ -1354,6 +1360,21 @@ document.getElementById('a-format-btn').addEventListener('click', async ()=>{
     msgEl.innerHTML = '<div class="msg err">' + escapeHtml(errText(e)) + '</div>';
   }
   btn.disabled = false; btn.textContent = '🎨 Colorize Attend Sheet';
+});
+
+document.getElementById('a-arrange-btn').addEventListener('click', async ()=>{
+  if(!confirm('Re-order the Attend sheet into batch blocks with black separator rows?\nTrainee values are kept; hand-made separator rows are replaced. Best done when nobody is checking in.')) return;
+  const btn = document.getElementById('a-arrange-btn');
+  const msgEl = document.getElementById('a-arrange-msg');
+  btn.disabled = true; btn.textContent = 'Arranging…';
+  msgEl.innerHTML = '';
+  try{
+    const res = await runScript('adminArrangeAttend');
+    msgEl.innerHTML = '<div class="msg ok">Done ✓ ' + res.people + ' trainees in ' + res.batches + ' batch block(s)</div>';
+  }catch(e){
+    msgEl.innerHTML = '<div class="msg err">' + escapeHtml(errText(e)) + '</div>';
+  }
+  btn.disabled = false; btn.textContent = '🗂 Arrange Attend by batch';
 });
 
 document.getElementById('a-trigger-btn').addEventListener('click', async ()=>{
